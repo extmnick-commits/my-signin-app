@@ -91,7 +91,6 @@ const App = () => {
     else { alert("Incorrect PIN"); setAdminPin(''); }
   };
 
-  // Fixed the Update to correctly write to the new artifacts path
   const updateSession = async (newData) => {
     const updatedSettings = { ...sessionSettings, ...newData };
     setSessionSettings(updatedSettings); // Update UI instantly
@@ -208,7 +207,7 @@ const App = () => {
                   </div>
                 )}
 
-                <button disabled={isSubmitting} type="submit" className="primary-button">{isSubmitting ? "Processing..." : "Sign"} <ArrowRight size={20} /></button>
+                <button disabled={isSubmitting} type="submit" className="primary-button" style={{marginTop: '1rem'}}>{isSubmitting ? "Processing..." : "Sign"} <ArrowRight size={20} /></button>
               </form>
             )}
           </div>
@@ -220,6 +219,8 @@ const App = () => {
             <div style={{ background: 'white', padding: '2rem', borderRadius: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '2rem', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Settings size={22} color="#4f46e5" /> Session Config</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '2rem' }}>
+                
+                {/* Fixed Logo Preview Area */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative', zIndex: 10 }}>
                   <div>
                     <label className="input-label">Main Title</label>
@@ -234,22 +235,39 @@ const App = () => {
                     <label className="input-label">Event Logo</label>
                     <button onClick={() => fileInputRef.current.click()} className="admin-toggle"><ImageIcon size={14} /> Upload Logo</button>
                     <input type="file" ref={fileInputRef} hidden onChange={handleLogoUpload} accept="image/*" />
+                    
                     {sessionSettings.logo && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                         <label className="input-label">Logo Height: {sessionSettings.logoHeight}px</label>
-                         <input type="range" min="40" max="200" value={sessionSettings.logoHeight} onChange={(e) => updateSession({ logoHeight: Number(e.target.value) })} style={{width: '100%'}} />
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
+                         {/* Added the missing img tag for preview here */}
+                         <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem', background: 'white', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                            <img src={sessionSettings.logo} alt="Preview" style={{ height: `${sessionSettings.logoHeight}px`, objectFit: 'contain' }} />
+                         </div>
+                         <div>
+                            <label className="input-label">Logo Height: {sessionSettings.logoHeight}px</label>
+                            <input type="range" min="40" max="200" value={sessionSettings.logoHeight} onChange={(e) => updateSession({ logoHeight: Number(e.target.value) })} style={{width: '100%'}} />
+                         </div>
                          <button onClick={() => updateSession({ logo: '' })} className="admin-toggle" style={{ color: '#ef4444', borderColor: '#fca5a5', alignSelf: 'flex-start' }}><X size={14} /> Remove</button>
                       </div>
                     )}
                   </div>
                 </div>
                 
+                {/* Fixed Preset Loading Logic */}
                 <div style={{ position: 'relative', zIndex: 20 }}>
                   <label className="input-label">Presets <button onClick={saveAsPreset} style={{float: 'right', border: 'none', background: 'none', color: '#4f46e5', fontWeight: 'bold', cursor: 'pointer'}}>Save Current</button></label>
                   <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem'}}>
                     {presets.map(p => (
                       <div key={p.id} style={{position: 'relative', display: 'inline-block'}}>
-                        <button onClick={() => updateSession({ title: p.title, subtitle: p.subtitle, logo: p.logo, logoHeight: p.logoHeight })} className="admin-toggle" style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569', paddingRight: '2.5rem'}}>
+                        <button 
+                          // Added fallbacks (|| '') here so older presets don't crash Firebase
+                          onClick={() => updateSession({ 
+                            title: p.title || 'Welcome!', 
+                            subtitle: p.subtitle || '', 
+                            logo: p.logo || '', 
+                            logoHeight: p.logoHeight || 80 
+                          })} 
+                          className="admin-toggle" 
+                          style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569', paddingRight: '2.5rem'}}>
                           {p.presetName}
                         </button>
                         <Trash2 size={14} onClick={(e) => deletePreset(p.id, e)} style={{position: 'absolute', right: '10px', top: '10px', cursor: 'pointer', color: sessionSettings.title === p.title ? 'white' : '#ef4444', zIndex: 30}} />
@@ -291,15 +309,19 @@ const App = () => {
                 <table className="roster-table" style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse'}}>
                   <thead><tr style={{background: '#f8fafc'}}><th style={{padding: '1rem'}}>Name</th><th style={{padding: '1rem'}}>Contact</th><th style={{padding: '1rem'}}>Role</th><th style={{padding: '1rem'}}>Time</th><th className="print:hidden"></th></tr></thead>
                   <tbody>
-                    {displayedSubmissions.map(item => (
-                      <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{padding: '1rem', fontWeight: 'bold'}}>{item.name}</td>
-                        <td style={{padding: '1rem'}}>{item.email}<br/><small>{item.phone}</small></td>
-                        <td style={{padding: '1rem'}}>{item.role} {item.role === 'Agent' && `(${item.repId})`}</td>
-                        <td style={{padding: '1rem', fontSize: '0.8rem'}}>{item.dateString} {item.timeString}</td>
-                        <td className="print:hidden" style={{padding: '1rem', textAlign: 'right'}}><Trash2 size={16} color="#ef4444" style={{cursor: 'pointer'}} onClick={() => deleteSubmission(item.id)} /></td>
-                      </tr>
-                    ))}
+                    {displayedSubmissions.length === 0 ? (
+                      <tr><td colSpan="5" style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>No sign-ins found for this selection.</td></tr>
+                    ) : (
+                      displayedSubmissions.map(item => (
+                        <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{padding: '1rem', fontWeight: 'bold'}}>{item.name}</td>
+                          <td style={{padding: '1rem'}}>{item.email}<br/><small>{item.phone}</small></td>
+                          <td style={{padding: '1rem'}}>{item.role} {item.role === 'Agent' && `(${item.repId})`}</td>
+                          <td style={{padding: '1rem', fontSize: '0.8rem'}}>{item.dateString} {item.timeString}</td>
+                          <td className="print:hidden" style={{padding: '1rem', textAlign: 'right'}}><Trash2 size={16} color="#ef4444" style={{cursor: 'pointer'}} onClick={() => deleteSubmission(item.id)} /></td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
