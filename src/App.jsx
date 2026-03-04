@@ -10,8 +10,7 @@ import {
 import { 
   getAuth, 
   onAuthStateChanged, 
-  signInAnonymously, 
-  signInWithCustomToken 
+  signInAnonymously 
 } from 'firebase/auth';
 import { 
   User, 
@@ -24,17 +23,10 @@ import {
   Download,
   Lock,
   CheckCircle2,
-  ExternalLink,
   Settings
 } from 'lucide-react';
 
-// --- Firebase Configuration ---
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
+// --- FIREBASE CONFIG (Updated from your screenshot) ---
 const firebaseConfig = {
   apiKey: "AIzaSyCkCWbqf6M2OLQxpGJkLkf92k-eW8pIPnM",
   authDomain: "virtual-sign-21884.firebaseapp.com",
@@ -44,20 +36,21 @@ const firebaseConfig = {
   appId: "1:1025000851049:web:99c907c759ec784837c4f8"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'virtual-sign-sheet';
 
 const App = () => {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('SIGNIN'); // SIGNIN, ADMIN_LOGIN, ADMIN_DASHBOARD
+  const [view, setView] = useState('SIGNIN'); 
   const [adminPassword, setAdminPassword] = useState('');
   const [submissions, setSubmissions] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   
-  // NEW: Deployment URL state for QR Code
-  // Set this to your public URL (e.g., https://my-event.vercel.app)
-  const [publicUrl, setPublicUrl] = useState(window.location.href);
+  // Set the public URL to the current window location by default
+  const [publicUrl, setPublicUrl] = useState(window.location.origin);
   const [showUrlSettings, setShowUrlSettings] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -66,17 +59,12 @@ const App = () => {
     phone: ''
   });
 
-  // --- Auth Logic (Rule 3) ---
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (error) {
-        // Silent fail
+        console.error("Auth initialization failed:", error);
       }
     };
     initAuth();
@@ -84,12 +72,10 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // --- Firestore Data Fetching ---
   useEffect(() => {
     if (!user || view !== 'ADMIN_DASHBOARD') return;
 
     const q = collection(db, 'artifacts', appId, 'public', 'data', 'signins');
-    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -126,7 +112,7 @@ const App = () => {
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 5000);
     } catch (err) {
-      console.error("Error saving document: ", err);
+      console.error("Error saving sign-in: ", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -142,13 +128,8 @@ const App = () => {
   const exportToCSV = () => {
     const headers = ['Name', 'Email', 'Phone', 'Date', 'Time'];
     const rows = submissions.map(s => [
-      `"${s.name}"`, 
-      `"${s.email}"`, 
-      `"${s.phone}"`, 
-      `"${s.dateString}"`, 
-      `"${s.timeString}"`
+      `"${s.name}"`, `"${s.email}"`, `"${s.phone}"`, `"${s.dateString}"`, `"${s.timeString}"`
     ]);
-    
     const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -171,9 +152,13 @@ const App = () => {
         </div>
         <div className="flex gap-4">
           {view === 'SIGNIN' ? (
-            <button onClick={() => setView('ADMIN_LOGIN')} className="text-sm font-medium text-slate-600 hover:text-indigo-600 flex items-center gap-1"><Lock size={16} /> Admin</button>
+            <button onClick={() => setView('ADMIN_LOGIN')} className="text-sm font-medium text-slate-600 hover:text-indigo-600 flex items-center gap-1 transition-colors">
+              <Lock size={16} /> Admin
+            </button>
           ) : (
-            <button onClick={() => setView('SIGNIN')} className="text-sm font-medium text-slate-600 hover:text-indigo-600 flex items-center gap-1"><ChevronLeft size={16} /> Back to Sign-In</button>
+            <button onClick={() => setView('SIGNIN')} className="text-sm font-medium text-slate-600 hover:text-indigo-600 flex items-center gap-1 transition-colors">
+              <ChevronLeft size={16} /> Back to Sign-In
+            </button>
           )}
         </div>
       </nav>
@@ -189,10 +174,14 @@ const App = () => {
 
               {showSuccess ? (
                 <div className="text-center py-12 animate-in fade-in zoom-in duration-300">
-                  <div className="bg-green-100 text-green-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle2 size={32} /></div>
-                  <h2 className="text-xl font-semibold mb-2">All Set!</h2>
+                  <div className="bg-green-100 text-green-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle2 size={32} />
+                  </div>
+                  <h2 className="text-xl font-semibold mb-2 text-slate-800">All Set!</h2>
                   <p className="text-slate-500 mb-6">Thank you for signing in.</p>
-                  <button onClick={() => setShowSuccess(false)} className="text-indigo-600 font-medium">Sign in another person</button>
+                  <button onClick={() => setShowSuccess(false)} className="text-indigo-600 font-medium hover:underline">
+                    Sign in another person
+                  </button>
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-5">
@@ -217,24 +206,29 @@ const App = () => {
                       <input required type="tel" placeholder="(555) 000-0000" className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 transition-all outline-none" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
                     </div>
                   </div>
-                  <button disabled={isSubmitting} type="submit" className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 flex items-center justify-center">
+                  <button disabled={isSubmitting} type="submit" className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 active:scale-[0.98] transition-all shadow-md shadow-indigo-100 flex items-center justify-center">
                     {isSubmitting ? "Signing in..." : "Sign In"}
                   </button>
                 </form>
               )}
             </div>
+            <p className="text-center text-xs text-slate-400 mt-8 uppercase tracking-widest font-medium">
+              Virtual Sign-In System
+            </p>
           </div>
         )}
 
         {view === 'ADMIN_LOGIN' && (
           <div className="max-w-md mx-auto mt-20">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-              <h2 className="text-xl font-bold mb-6 text-center">Admin Access</h2>
+              <h2 className="text-xl font-bold mb-6 text-center text-slate-800">Admin Access</h2>
               <form onSubmit={handleAdminLogin} className="space-y-4">
                 <input type="password" placeholder="Password" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} />
-                <button type="submit" className="w-full bg-slate-900 text-white font-semibold py-3 rounded-xl">Access Dashboard</button>
+                <button type="submit" className="w-full bg-slate-900 text-white font-semibold py-3 rounded-xl hover:bg-slate-800 transition-colors">
+                  Access Dashboard
+                </button>
               </form>
-              <p className="text-[10px] text-slate-400 mt-4 text-center">Password: admin123</p>
+              <p className="text-[10px] text-slate-400 mt-4 text-center">Default Password: admin123</p>
             </div>
           </div>
         )}
@@ -243,12 +237,16 @@ const App = () => {
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
               <div>
-                <h1 className="text-2xl font-bold">Sign-In History</h1>
-                <p className="text-slate-500">{submissions.length} participants</p>
+                <h1 className="text-2xl font-bold text-slate-800">Sign-In History</h1>
+                <p className="text-slate-500">{submissions.length} participants registered</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={exportToCSV} className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50"><Download size={16} /> Export</button>
-                <button onClick={() => window.print()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-indigo-700"><Printer size={16} /> Print</button>
+                <button onClick={exportToCSV} className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-slate-50 transition-all">
+                  <Download size={16} /> Export
+                </button>
+                <button onClick={() => window.print()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium flex items-center gap-2 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100">
+                  <Printer size={16} /> Print List
+                </button>
               </div>
             </div>
 
@@ -256,7 +254,9 @@ const App = () => {
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center print:hidden">
                 <h3 className="font-bold mb-4 flex items-center gap-2 w-full justify-between">
                   <span className="flex items-center gap-2"><QrCode size={18} className="text-indigo-600" /> QR Poster</span>
-                  <button onClick={() => setShowUrlSettings(!showUrlSettings)} className="text-slate-400 hover:text-indigo-600"><Settings size={16}/></button>
+                  <button onClick={() => setShowUrlSettings(!showUrlSettings)} className="text-slate-400 hover:text-indigo-600 transition-colors">
+                    <Settings size={16}/>
+                  </button>
                 </h3>
                 
                 {showUrlSettings && (
@@ -266,10 +266,10 @@ const App = () => {
                       type="text" 
                       value={publicUrl} 
                       onChange={(e) => setPublicUrl(e.target.value)}
-                      className="w-full p-2 border rounded bg-white"
+                      className="w-full p-2 border rounded bg-white outline-none focus:ring-1 focus:ring-indigo-500"
                       placeholder="https://your-site.vercel.app"
                     />
-                    <p className="mt-2 text-slate-400 italic">Enter your final website URL here to update the QR code below.</p>
+                    <p className="mt-2 text-slate-400 italic">Paste your live Vercel URL here to update the QR code below.</p>
                   </div>
                 )}
 
@@ -280,14 +280,18 @@ const App = () => {
                   const win = window.open("", "_blank");
                   win.document.write(`
                     <div style="text-align:center; padding: 60px; font-family: sans-serif;">
-                      <h1 style="font-size: 3rem; margin-bottom: 0;">Welcome!</h1>
-                      <p style="font-size: 1.5rem; color: #666; margin-top: 10px;">Scan to Sign In</p>
-                      <img src="${qrCodeUrl}" style="width: 400px; height: 400px; margin: 40px 0;" />
-                      <p style="color: #999;">Visit: ${publicUrl}</p>
+                      <h1 style="font-size: 3.5rem; margin-bottom: 0;">Welcome!</h1>
+                      <p style="font-size: 1.5rem; color: #666; margin-top: 10px;">Please Scan to Sign In</p>
+                      <div style="margin: 40px auto; width: 400px; padding: 20px; border: 15px solid #f0f7ff; border-radius: 40px;">
+                        <img src="${qrCodeUrl}" style="width: 100%; height: auto;" />
+                      </div>
+                      <p style="color: #999; font-size: 0.9rem;">Sign-in page: ${publicUrl}</p>
                     </div>
                   `);
                   win.print();
-                }} className="text-sm text-indigo-600 font-bold hover:underline">Print Entrance Sign</button>
+                }} className="text-sm text-indigo-600 font-bold hover:underline transition-all">
+                  Print Entrance Sign
+                </button>
               </div>
 
               <div className="md:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -297,13 +301,18 @@ const App = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {submissions.length === 0 ? (
-                      <tr><td colSpan="3" className="px-6 py-16 text-center text-slate-400">No entries yet.</td></tr>
+                      <tr><td colSpan="3" className="px-6 py-16 text-center text-slate-400 italic">No entries yet.</td></tr>
                     ) : (
                       submissions.map((item) => (
-                        <tr key={item.id}>
-                          <td className="px-6 py-4 font-semibold">{item.name}</td>
-                          <td className="px-6 py-4 text-slate-600">{item.email}<br/><span className="text-slate-400 text-xs">{item.phone}</span></td>
-                          <td className="px-6 py-4 whitespace-nowrap"><span className="text-slate-700 font-mono text-xs">{item.dateString}</span><br/><span className="text-indigo-400 text-[10px] font-bold uppercase">{item.timeString}</span></td>
+                        <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-semibold text-slate-900">{item.name}</td>
+                          <td className="px-6 py-4 text-slate-600">
+                            {item.email}<br/><span className="text-slate-400 text-xs">{item.phone}</span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className="text-slate-700 font-mono text-xs">{item.dateString}</span><br/>
+                            <span className="text-indigo-400 text-[10px] font-bold uppercase">{item.timeString}</span>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -317,9 +326,10 @@ const App = () => {
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           .print\\:hidden { display: none !important; }
-          main { max-width: 100% !important; margin: 0 !important; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { border-bottom: 1px solid #eee; padding: 10px; }
+          main { max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+          .bg-white { box-shadow: none !important; border: none !important; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border-bottom: 1px solid #eee; padding: 12px; }
         }
       `}} />
     </div>
