@@ -46,7 +46,7 @@ const App = () => {
     onAuthStateChanged(auth, setUser);
   }, []);
 
-  // FIXED PATHS: Moving settings inside the "artifacts" folder so rules allow the save
+  // Syncing with "artifacts" path
   useEffect(() => {
     if (!user) return;
     
@@ -91,12 +91,15 @@ const App = () => {
     else { alert("Incorrect PIN"); setAdminPin(''); }
   };
 
+  // Fixed the Update to correctly write to the new artifacts path
   const updateSession = async (newData) => {
-    setSessionSettings(prev => ({ ...prev, ...newData }));
+    const updatedSettings = { ...sessionSettings, ...newData };
+    setSessionSettings(updatedSettings); // Update UI instantly
+    
     try {
-      await setDoc(doc(db, 'artifacts', 'virtual-sign-sheet', 'config', 'currentSession'), newData, { merge: true });
+      await setDoc(doc(db, 'artifacts', 'virtual-sign-sheet', 'config', 'currentSession'), updatedSettings, { merge: true });
     } catch (e) {
-      console.error("Database Save Blocked: Check Firestore Rules for 'artifacts' path.");
+      console.error("Firebase Update Failed:", e);
     }
   };
 
@@ -122,17 +125,19 @@ const App = () => {
     const file = e.target.files[0];
     if (!file) return;
     
+    // Quick preview
     const reader = new FileReader();
     reader.onload = (e) => setSessionSettings(prev => ({...prev, logo: e.target.result}));
     reader.readAsDataURL(file);
 
+    // Save to Cloud Storage
     try {
       const storageRef = ref(storage, `logos/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
       await updateSession({ logo: url });
     } catch (err) {
-      alert("Logo saved locally but cloud upload failed. Ensure Storage rules are set to 'allow write: if request.auth != null'.");
+      console.error("Storage upload failed.", err);
     }
   };
 
@@ -159,6 +164,7 @@ const App = () => {
       </nav>
 
       <main className="main-container">
+        {/* VIEW: SIGN IN */}
         {view === 'SIGNIN' && (
           <div className="modern-card">
             <header className="card-header" style={{marginBottom: '2rem', textAlign: 'center'}}>
@@ -208,37 +214,45 @@ const App = () => {
           </div>
         )}
 
+        {/* VIEW: ADMIN DASHBOARD */}
         {view === 'ADMIN_DASHBOARD' && (
           <div className="admin-dashboard">
-            <div style={{ background: 'white', padding: '2rem', borderRadius: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '2rem' }}>
+            <div style={{ background: 'white', padding: '2rem', borderRadius: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '2rem', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Settings size={22} color="#4f46e5" /> Session Config</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '2rem' }}>
-                <div>
-                  <label className="input-label">Main Title</label>
-                  <input className="modern-input" style={{paddingLeft: '1rem'}} value={sessionSettings.title} onChange={(e) => updateSession({ title: e.target.value })} />
-                  <label className="input-label" style={{marginTop: '1rem'}}>Subtitle</label>
-                  <input className="modern-input" style={{paddingLeft: '1rem'}} value={sessionSettings.subtitle} onChange={(e) => updateSession({ subtitle: e.target.value })} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative', zIndex: 10 }}>
+                  <div>
+                    <label className="input-label">Main Title</label>
+                    <input className="modern-input" style={{padding: '0.6rem 1rem'}} value={sessionSettings.title} onChange={(e) => updateSession({ title: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="input-label" style={{marginTop: '1rem'}}>Subtitle</label>
+                    <input className="modern-input" style={{padding: '0.6rem 1rem'}} value={sessionSettings.subtitle} onChange={(e) => updateSession({ subtitle: e.target.value })} />
+                  </div>
                   
-                  <div style={{marginTop: '1.5rem'}}>
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '1.5rem' }}>
+                    <label className="input-label">Event Logo</label>
                     <button onClick={() => fileInputRef.current.click()} className="admin-toggle"><ImageIcon size={14} /> Upload Logo</button>
                     <input type="file" ref={fileInputRef} hidden onChange={handleLogoUpload} accept="image/*" />
                     {sessionSettings.logo && (
-                      <div style={{marginTop: '1rem'}}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
                          <label className="input-label">Logo Height: {sessionSettings.logoHeight}px</label>
                          <input type="range" min="40" max="200" value={sessionSettings.logoHeight} onChange={(e) => updateSession({ logoHeight: Number(e.target.value) })} style={{width: '100%'}} />
+                         <button onClick={() => updateSession({ logo: '' })} className="admin-toggle" style={{ color: '#ef4444', borderColor: '#fca5a5', alignSelf: 'flex-start' }}><X size={14} /> Remove</button>
                       </div>
                     )}
                   </div>
                 </div>
-                <div>
+                
+                <div style={{ position: 'relative', zIndex: 20 }}>
                   <label className="input-label">Presets <button onClick={saveAsPreset} style={{float: 'right', border: 'none', background: 'none', color: '#4f46e5', fontWeight: 'bold', cursor: 'pointer'}}>Save Current</button></label>
                   <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem'}}>
                     {presets.map(p => (
-                      <div key={p.id} style={{position: 'relative'}}>
+                      <div key={p.id} style={{position: 'relative', display: 'inline-block'}}>
                         <button onClick={() => updateSession({ title: p.title, subtitle: p.subtitle, logo: p.logo, logoHeight: p.logoHeight })} className="admin-toggle" style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569', paddingRight: '2.5rem'}}>
                           {p.presetName}
                         </button>
-                        <Trash2 size={14} onClick={(e) => deletePreset(p.id, e)} style={{position: 'absolute', right: '10px', top: '10px', cursor: 'pointer', color: sessionSettings.title === p.title ? 'white' : '#ef4444'}} />
+                        <Trash2 size={14} onClick={(e) => deletePreset(p.id, e)} style={{position: 'absolute', right: '10px', top: '10px', cursor: 'pointer', color: sessionSettings.title === p.title ? 'white' : '#ef4444', zIndex: 30}} />
                       </div>
                     ))}
                   </div>
@@ -246,8 +260,11 @@ const App = () => {
               </div>
             </div>
 
-            <header className="dashboard-header print:hidden" style={{display: 'flex', justifyContent: 'space-between', marginBottom: '2rem'}}>
-               <h1>{sessionSettings.title} Roster ({displayedSubmissions.length})</h1>
+            <header className="dashboard-header print:hidden" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+               <div>
+                 <h1 style={{margin: 0}}>{sessionSettings.title} Roster ({displayedSubmissions.length})</h1>
+                 <p style={{color: '#64748b', margin: '0.25rem 0 0'}}>Real-time sync active</p>
+               </div>
                <div style={{display: 'flex', gap: '1rem'}}>
                   <button onClick={handleRefresh} className="admin-toggle"><RefreshCw size={18} className={isRefreshing ? "spin-animation" : ""} /> Refresh</button>
                   <button onClick={() => window.print()} className="primary-button" style={{width: 'auto', padding: '0.6rem 1.2rem'}}><Printer size={18} /> Print PDF</button>
@@ -264,6 +281,13 @@ const App = () => {
               </div>
 
               <div className="table-container" style={{ flex: '3 1 600px', background: 'white', borderRadius: '1.5rem', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                <div className="print-only" style={{ display: 'none', textAlign: 'center', padding: '2rem' }}>
+                   {sessionSettings.logo && <img src={sessionSettings.logo} style={{height: `${sessionSettings.logoHeight}px`, objectFit: 'contain', marginBottom: '1rem'}} />}
+                   <h1 style={{margin: '0 0 0.5rem 0'}}>{sessionSettings.title}</h1>
+                   <p style={{margin: 0, color: '#64748b', fontSize: '1.1rem'}}>{sessionSettings.subtitle}</p>
+                   <p style={{marginTop: '1rem', fontWeight: 'bold'}}>{selectedFolder === 'All' ? 'Complete Records' : `Date: ${selectedFolder}`}</p>
+                </div>
+
                 <table className="roster-table" style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse'}}>
                   <thead><tr style={{background: '#f8fafc'}}><th style={{padding: '1rem'}}>Name</th><th style={{padding: '1rem'}}>Contact</th><th style={{padding: '1rem'}}>Role</th><th style={{padding: '1rem'}}>Time</th><th className="print:hidden"></th></tr></thead>
                   <tbody>
@@ -296,7 +320,7 @@ const App = () => {
       </main>
 
       <style dangerouslySetInnerHTML={{__html: `
-        @media print { .print\:hidden { display: none !important; } }
+        @media print { .print-only { display: block !important; } .print\:hidden { display: none !important; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         .spin-animation { animation: spin 0.8s linear infinite; }
