@@ -41,15 +41,21 @@ const App = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const fileInputRef = useRef(null);
 
+  // 1. Manage Authentication
   useEffect(() => {
-    signInAnonymously(auth);
-    onAuthStateChanged(auth, setUser);
+    signInAnonymously(auth).catch(console.error);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser); // This is the crucial part that lets the rest of the app know it's safe to load data
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Syncing with "artifacts" path
+  // 2. Fetch Data ONLY after user is confirmed by Firebase
   useEffect(() => {
+    // If user is null (still loading), do absolutely nothing. Wait.
     if (!user) return;
     
+    // Now that we are logged in, it's safe to fetch without the Rules blocking us
     const qSignins = query(collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'), orderBy('timestamp', 'desc'));
     const unsubSignins = onSnapshot(qSignins, (snap) => setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 
@@ -92,11 +98,9 @@ const App = () => {
   };
 
   const updateSession = async (newData) => {
-    const updatedSettings = { ...sessionSettings, ...newData };
-    setSessionSettings(updatedSettings); // Update UI instantly
-    
+    setSessionSettings(prev => ({ ...prev, ...newData }));
     try {
-      await setDoc(doc(db, 'artifacts', 'virtual-sign-sheet', 'config', 'currentSession'), updatedSettings, { merge: true });
+      await setDoc(doc(db, 'artifacts', 'virtual-sign-sheet', 'config', 'currentSession'), newData, { merge: true });
     } catch (e) {
       console.error("Firebase Update Failed:", e);
     }
@@ -124,12 +128,10 @@ const App = () => {
     const file = e.target.files[0];
     if (!file) return;
     
-    // Quick preview
     const reader = new FileReader();
     reader.onload = (e) => setSessionSettings(prev => ({...prev, logo: e.target.result}));
     reader.readAsDataURL(file);
 
-    // Save to Cloud Storage
     try {
       const storageRef = ref(storage, `logos/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
@@ -219,8 +221,6 @@ const App = () => {
             <div style={{ background: 'white', padding: '2rem', borderRadius: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '2rem', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Settings size={22} color="#4f46e5" /> Session Config</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '2rem' }}>
-                
-                {/* Fixed Logo Preview Area */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative', zIndex: 10 }}>
                   <div>
                     <label className="input-label">Main Title</label>
@@ -235,10 +235,8 @@ const App = () => {
                     <label className="input-label">Event Logo</label>
                     <button onClick={() => fileInputRef.current.click()} className="admin-toggle"><ImageIcon size={14} /> Upload Logo</button>
                     <input type="file" ref={fileInputRef} hidden onChange={handleLogoUpload} accept="image/*" />
-                    
                     {sessionSettings.logo && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-                         {/* Added the missing img tag for preview here */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
                          <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem', background: 'white', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
                             <img src={sessionSettings.logo} alt="Preview" style={{ height: `${sessionSettings.logoHeight}px`, objectFit: 'contain' }} />
                          </div>
@@ -252,22 +250,12 @@ const App = () => {
                   </div>
                 </div>
                 
-                {/* Fixed Preset Loading Logic */}
                 <div style={{ position: 'relative', zIndex: 20 }}>
                   <label className="input-label">Presets <button onClick={saveAsPreset} style={{float: 'right', border: 'none', background: 'none', color: '#4f46e5', fontWeight: 'bold', cursor: 'pointer'}}>Save Current</button></label>
                   <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem'}}>
                     {presets.map(p => (
                       <div key={p.id} style={{position: 'relative', display: 'inline-block'}}>
-                        <button 
-                          // Added fallbacks (|| '') here so older presets don't crash Firebase
-                          onClick={() => updateSession({ 
-                            title: p.title || 'Welcome!', 
-                            subtitle: p.subtitle || '', 
-                            logo: p.logo || '', 
-                            logoHeight: p.logoHeight || 80 
-                          })} 
-                          className="admin-toggle" 
-                          style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569', paddingRight: '2.5rem'}}>
+                        <button onClick={() => updateSession({ title: p.title || 'Welcome!', subtitle: p.subtitle || '', logo: p.logo || '', logoHeight: p.logoHeight || 80 })} className="admin-toggle" style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569', paddingRight: '2.5rem'}}>
                           {p.presetName}
                         </button>
                         <Trash2 size={14} onClick={(e) => deletePreset(p.id, e)} style={{position: 'absolute', right: '10px', top: '10px', cursor: 'pointer', color: sessionSettings.title === p.title ? 'white' : '#ef4444', zIndex: 30}} />
