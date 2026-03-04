@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
-import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, Trash2, Image as ImageIcon } from 'lucide-react';
+import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, Image as ImageIcon, X } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
 const firebaseConfig = {
@@ -28,8 +28,13 @@ const App = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   
-  // Session & Branding State
-  const [sessionSettings, setSessionSettings] = useState({ title: 'Welcome!', logo: '' });
+  // Session & Branding State (Added subtitle and logoHeight)
+  const [sessionSettings, setSessionSettings] = useState({ 
+    title: 'Welcome!', 
+    subtitle: 'Please sign in for today\'s session.', 
+    logo: '', 
+    logoHeight: 80 
+  });
   const [presets, setPresets] = useState([]);
   const [isAgent, setIsAgent] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '' });
@@ -42,7 +47,7 @@ const App = () => {
     onAuthStateChanged(auth, setUser);
   }, []);
 
-  // Sync Settings and Sign-ins
+  // Sync Settings, Sign-ins, and Presets
   useEffect(() => {
     if (!user) return;
     
@@ -52,7 +57,15 @@ const App = () => {
 
     // Sync Session Settings
     const unsubSettings = onSnapshot(doc(db, 'settings', 'currentSession'), (snap) => {
-      if (snap.exists()) setSessionSettings(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setSessionSettings({
+          title: data.title || 'Welcome!',
+          subtitle: data.subtitle || 'Please sign in for today\'s session.',
+          logo: data.logo || '',
+          logoHeight: data.logoHeight || 80
+        });
+      }
     });
 
     // Sync Presets
@@ -95,17 +108,35 @@ const App = () => {
   };
 
   const saveAsPreset = async () => {
-    const name = prompt("Enter a name for this preset (e.g. Training Day):");
-    if (name) await addDoc(collection(db, 'presets'), { ...sessionSettings, presetName: name });
+    const name = prompt("Enter a name for this preset (e.g. Saturday Training):");
+    if (name) {
+      await addDoc(collection(db, 'presets'), { 
+        ...sessionSettings, 
+        presetName: name 
+      });
+      alert("Preset saved!");
+    }
   };
 
   const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
+    // Quick local preview feedback for the user before upload finishes
+    const reader = new FileReader();
+    reader.onload = (e) => updateSession({ logo: e.target.result });
+    reader.readAsDataURL(file);
+
+    // Actual upload to Firebase Storage
     const storageRef = ref(storage, `logos/${Date.now()}_${file.name}`);
     await uploadBytes(storageRef, file);
     const url = await getDownloadURL(storageRef);
-    updateSession({ logo: url });
+    updateSession({ logo: url }); // Update with real public URL
+  };
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    setTimeout(() => setIsRefreshing(false), 800); 
   };
 
   const uniqueDates = [...new Set(submissions.map(s => s.dateString))];
@@ -130,9 +161,15 @@ const App = () => {
         {view === 'SIGNIN' && (
           <div className="modern-card">
             <header className="card-header" style={{marginBottom: '2rem'}}>
-              {sessionSettings.logo && <img src={sessionSettings.logo} alt="Event Logo" style={{maxHeight: '80px', marginBottom: '1.5rem', borderRadius: '8px'}} />}
+              {sessionSettings.logo && (
+                <img 
+                  src={sessionSettings.logo} 
+                  alt="Event Logo" 
+                  style={{height: `${sessionSettings.logoHeight}px`, objectFit: 'contain', marginBottom: '1.5rem', borderRadius: '8px'}} 
+                />
+              )}
               <h1 style={{fontSize: '2.2rem', margin: 0}}>{sessionSettings.title}</h1>
-              <p style={{marginTop: '0.5rem', color: '#64748b'}}>Please check in below</p>
+              <p style={{marginTop: '0.5rem', color: '#64748b', fontSize: '1.1rem'}}>{sessionSettings.subtitle}</p>
             </header>
 
             {showSuccess ? (
@@ -169,7 +206,7 @@ const App = () => {
                   </div>
                 )}
 
-                <button disabled={isSubmitting} type="submit" className="primary-button">{isSubmitting ? "Processing..." : "Sign"} <ArrowRight size={20} /></button>
+                <button disabled={isSubmitting} type="submit" className="primary-button" style={{marginTop: '1rem'}}>{isSubmitting ? "Processing..." : "Sign"} <ArrowRight size={20} /></button>
               </form>
             )}
           </div>
@@ -181,63 +218,129 @@ const App = () => {
             {/* Session Config Section */}
             <div style={{ background: 'white', padding: '2rem', borderRadius: '1.5rem', border: '1px solid #e2e8f0', marginBottom: '2rem', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0 }}><Settings size={22} color="#4f46e5" /> Session Config</h2>
+              
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '2rem' }}>
-                <div>
-                  <label className="input-label">Page Title</label>
-                  <input className="modern-input" style={{paddingLeft: '1rem'}} value={sessionSettings.title} onChange={(e) => updateSession({ title: e.target.value })} placeholder="Ex: Tuesday Training" />
-                  <div style={{marginTop: '1rem', display: 'flex', gap: '0.5rem'}}>
-                    <button onClick={() => fileInputRef.current.click()} className="admin-toggle"><ImageIcon size={14} /> Upload Logo</button>
-                    <button onClick={saveAsPreset} className="admin-toggle"><Plus size={14} /> Save Preset</button>
-                    <input type="file" ref={fileInputRef} hidden onChange={handleLogoUpload} accept="image/*" />
+                {/* Branding Controls */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label className="input-label">Main Title</label>
+                    <input className="modern-input" style={{padding: '0.6rem 1rem'}} value={sessionSettings.title} onChange={(e) => updateSession({ title: e.target.value })} placeholder="Ex: Tuesday Opportunity Night" />
+                  </div>
+                  <div>
+                    <label className="input-label">Subtitle (Name of Sign-in Sheet)</label>
+                    <input className="modern-input" style={{padding: '0.6rem 1rem'}} value={sessionSettings.subtitle} onChange={(e) => updateSession({ subtitle: e.target.value })} placeholder="Ex: Hosted by the Leadership Team" />
+                  </div>
+                  
+                  <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    <label className="input-label">Event Logo</label>
+                    {sessionSettings.logo ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem', background: 'white', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                          <img src={sessionSettings.logo} alt="Preview" style={{ height: `${sessionSettings.logoHeight}px`, objectFit: 'contain' }} />
+                        </div>
+                        <div>
+                          <label className="input-label" style={{ fontSize: '0.65rem' }}>Logo Size: {sessionSettings.logoHeight}px</label>
+                          <input 
+                            type="range" 
+                            min="40" 
+                            max="200" 
+                            value={sessionSettings.logoHeight} 
+                            onChange={(e) => updateSession({ logoHeight: Number(e.target.value) })}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                        <button onClick={() => updateSession({ logo: '' })} className="admin-toggle" style={{ color: '#ef4444', borderColor: '#fca5a5', alignSelf: 'flex-start' }}>
+                          <X size={14} /> Remove Logo
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <button onClick={() => fileInputRef.current.click()} className="admin-toggle"><ImageIcon size={14} /> Upload Image</button>
+                        <input type="file" ref={fileInputRef} hidden onChange={handleLogoUpload} accept="image/*" />
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* Presets Controls */}
                 <div>
-                  <label className="input-label">Saved Presets</label>
-                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
-                    {presets.map(p => (
-                      <button key={p.id} onClick={() => updateSession({ title: p.title, logo: p.logo })} className="admin-toggle" style={{background: sessionSettings.title === p.title ? '#4f46e5' : '#f1f5f9', color: sessionSettings.title === p.title ? 'white' : '#475569'}}>
-                        {p.presetName}
-                      </button>
-                    ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <label className="input-label" style={{ margin: 0 }}>Saved Presets</label>
+                    <button onClick={saveAsPreset} className="admin-toggle" style={{ padding: '0.3rem 0.8rem', fontSize: '0.8rem' }}><Plus size={14} /> Save Current</button>
+                  </div>
+                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', minHeight: '100px'}}>
+                    {presets.length === 0 ? (
+                      <p style={{color: '#94a3b8', fontSize: '0.85rem', margin: 0}}>No presets saved yet.</p>
+                    ) : (
+                      presets.map(p => (
+                        <button 
+                          key={p.id} 
+                          onClick={() => updateSession({ title: p.title, subtitle: p.subtitle || '', logo: p.logo || '', logoHeight: p.logoHeight || 80 })} 
+                          className="admin-toggle" 
+                          style={{background: sessionSettings.title === p.title ? '#4f46e5' : 'white', color: sessionSettings.title === p.title ? 'white' : '#475569'}}
+                        >
+                          {p.presetName}
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Existing Roster Logic */}
-            <header className="dashboard-header print:hidden" style={{display: 'flex', justifyContent: 'space-between', marginBottom: '2rem'}}>
-               <h1>{sessionSettings.title} Roster ({displayedSubmissions.length})</h1>
-               <button onClick={() => window.print()} className="primary-button" style={{width: 'auto', padding: '0.6rem 1.2rem'}}><Printer size={18} /> Print PDF</button>
+            <header className="dashboard-header print:hidden" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem'}}>
+              <div>
+                <h1 style={{margin: 0}}>{sessionSettings.title} Roster ({displayedSubmissions.length})</h1>
+                <p style={{color: '#64748b', margin: '0.25rem 0 0'}}>Real-time sync active</p>
+              </div>
+              <div style={{display: 'flex', gap: '1rem'}}>
+                <button onClick={handleRefresh} className="admin-toggle" style={{ border: '1px solid #e2e8f0', background: 'white' }}>
+                  <RefreshCw size={18} className={isRefreshing ? "spin-animation" : ""} color="#4f46e5" /> 
+                  {isRefreshing ? "Syncing..." : "Refresh"}
+                </button>
+                <button onClick={() => window.print()} className="primary-button print-btn" style={{width: 'auto', padding: '0.6rem 1.2rem', borderRadius: '20px', fontSize: '1rem'}}>
+                  <Printer size={18} /> Print PDF
+                </button>
+              </div>
             </header>
 
             <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
               <div className="print:hidden" style={{ flex: '1 1 200px', background: 'white', borderRadius: '1.5rem', padding: '1.5rem', border: '1px solid #e2e8f0' }}>
-                <h3 style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}><Folder size={18} /> Folders</h3>
-                <button onClick={() => setSelectedFolder('All')} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === 'All' ? '#eff6ff' : 'transparent', color: selectedFolder === 'All' ? '#4f46e5' : '#64748b' }}>All Records</button>
+                <h3 style={{display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: 0}}><Folder size={18} /> Folders</h3>
+                <button onClick={() => setSelectedFolder('All')} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === 'All' ? '#eff6ff' : 'transparent', color: selectedFolder === 'All' ? '#4f46e5' : '#64748b', fontWeight: 'bold' }}>All Records</button>
                 {uniqueDates.map(date => (
-                  <button key={date} onClick={() => setSelectedFolder(date)} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === date ? '#eff6ff' : 'transparent' }}>{date}</button>
+                  <button key={date} onClick={() => setSelectedFolder(date)} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === date ? '#eff6ff' : 'transparent', color: selectedFolder === date ? '#4f46e5' : '#64748b', fontWeight: 'bold' }}>{date}</button>
                 ))}
               </div>
 
               <div className="table-container" style={{ flex: '3 1 600px', background: 'white', borderRadius: '1.5rem', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                 {/* Print Header */}
                 <div className="print-only" style={{ display: 'none', textAlign: 'center', padding: '2rem' }}>
-                   {sessionSettings.logo && <img src={sessionSettings.logo} height="60" style={{marginBottom: '1rem'}} />}
-                   <h1>{sessionSettings.title}</h1>
-                   <p>{selectedFolder === 'All' ? 'Complete Records' : `Date: ${selectedFolder}`}</p>
+                   {sessionSettings.logo && <img src={sessionSettings.logo} style={{height: `${sessionSettings.logoHeight}px`, objectFit: 'contain', marginBottom: '1rem'}} />}
+                   <h1 style={{margin: '0 0 0.5rem 0'}}>{sessionSettings.title}</h1>
+                   <p style={{margin: 0, color: '#64748b', fontSize: '1.1rem'}}>{sessionSettings.subtitle}</p>
+                   <p style={{marginTop: '1rem', fontWeight: 'bold'}}>{selectedFolder === 'All' ? 'Complete Records' : `Date: ${selectedFolder}`}</p>
                 </div>
 
-                <table className="roster-table" style={{width: '100%'}}>
-                  <thead><tr style={{background: '#f8fafc'}}><th>Name</th><th>Contact</th><th>Role / ID</th><th>Time</th></tr></thead>
+                <table className="roster-table" style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse'}}>
+                  <thead><tr style={{background: '#f8fafc', borderBottom: '1px solid #e2e8f0'}}><th style={{padding: '1rem'}}>Name</th><th style={{padding: '1rem'}}>Contact</th><th style={{padding: '1rem'}}>Role / ID</th><th style={{padding: '1rem'}}>Time</th></tr></thead>
                   <tbody>
-                    {displayedSubmissions.map(item => (
-                      <tr key={item.id}>
-                        <td style={{fontWeight: 'bold'}}>{item.name}</td>
-                        <td>{item.email}<br/><small>{item.phone}</small></td>
-                        <td>{item.role} {item.role === 'Agent' && `(${item.repId})`}</td>
-                        <td style={{fontSize: '0.8rem'}}>{item.dateString} {item.timeString}</td>
-                      </tr>
-                    ))}
+                    {displayedSubmissions.length === 0 ? (
+                      <tr><td colSpan="4" style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>No sign-ins found for this selection.</td></tr>
+                    ) : (
+                      displayedSubmissions.map(item => (
+                        <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{padding: '1rem', fontWeight: 'bold'}}>{item.name}</td>
+                          <td style={{padding: '1rem'}}>{item.email}<br/><small style={{color: '#94a3b8'}}>{item.phone}</small></td>
+                          <td style={{padding: '1rem'}}>
+                            <span style={{ fontWeight: 'bold', color: item.role === 'Agent' ? '#4f46e5' : '#64748b' }}>{item.role || 'Guest'}</span>
+                            {item.role === 'Agent' && <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '0.2rem' }}>ID: {item.repId}</div>}
+                          </td>
+                          <td style={{padding: '1rem', fontSize: '0.85rem', color: '#64748b'}}>{item.dateString} <br/> <span style={{color: '#94a3b8'}}>{item.timeString}</span></td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -251,8 +354,8 @@ const App = () => {
              <Lock size={48} color="#4f46e5" style={{margin: '0 auto 1rem'}} />
              <h2>Admin PIN</h2>
              <form onSubmit={handleAdminLogin}>
-                <input type="password" className="modern-input" placeholder="0000" maxLength={4} style={{textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.5em'}} value={adminPin} onChange={(e) => setAdminPin(e.target.value)} />
-                <button type="submit" className="primary-button" style={{marginTop: '1.5rem'}}>Unlock</button>
+                <input type="password" className="modern-input" placeholder="0000" maxLength={4} style={{textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.5em', marginBottom: '1.5rem'}} value={adminPin} onChange={(e) => setAdminPin(e.target.value)} />
+                <button type="submit" className="primary-button">Unlock</button>
              </form>
           </div>
         )}
@@ -261,6 +364,8 @@ const App = () => {
       <style dangerouslySetInnerHTML={{__html: `
         @media print { .print-only { display: block !important; } .print\:hidden { display: none !important; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .spin-animation { animation: spin 0.8s linear infinite; }
       `}} />
     </div>
   );
