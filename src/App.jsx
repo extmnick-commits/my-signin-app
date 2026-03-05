@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
-import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, Image as ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar } from 'lucide-react';
+import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
 const firebaseConfig = {
@@ -51,6 +51,7 @@ const App = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [isAgent, setIsAgent] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '' });
+  const [rememberMe, setRememberMe] = useState(false); // NEW: Remember state
   const [selectedFolder, setSelectedFolder] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -62,6 +63,18 @@ const App = () => {
     const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
+
+  // NEW: Auto-fill logic for Agents
+  useEffect(() => {
+    if (isAgent) {
+      const savedAgent = localStorage.getItem('saved_agent_info');
+      if (savedAgent) {
+        const parsed = JSON.parse(savedAgent);
+        setFormData(parsed);
+        setRememberMe(true);
+      }
+    }
+  }, [isAgent]);
 
   // 2. Fetch Data
   useEffect(() => {
@@ -106,7 +119,7 @@ const App = () => {
     } catch (error) { console.error("Error fetching logos"); }
   };
 
-  // --- DERIVED DATA (The Fix for the Blank Roster) ---
+  // --- DERIVED DATA ---
   const { uniqueDates, displayedSubmissions } = useMemo(() => {
     const dates = [...new Set(submissions.map(s => s.dateString))].filter(Boolean);
     let filtered = submissions;
@@ -127,6 +140,13 @@ const App = () => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      // NEW: Save info if rememberMe is checked
+      if (isAgent && rememberMe) {
+        localStorage.setItem('saved_agent_info', JSON.stringify(formData));
+      } else if (isAgent && !rememberMe) {
+        localStorage.removeItem('saved_agent_info');
+      }
+
       await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'), {
         name: formData.name,
         email: liveSession.reqEmail ? formData.email : 'N/A',
@@ -138,8 +158,13 @@ const App = () => {
         dateString: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         timeString: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       });
-      setFormData({ name: '', email: '', phone: '', repId: '' });
-      setIsAgent(false);
+      
+      // Reset only if not remembering
+      if (!rememberMe) {
+        setFormData({ name: '', email: '', phone: '', repId: '' });
+        setIsAgent(false);
+      }
+      
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 4000);
     } catch (err) { alert("Submission failed."); } 
@@ -215,7 +240,7 @@ const App = () => {
 
   const deleteItem = async (path, id) => {
     if (window.confirm("Permanently delete?")) {
-      await deleteDoc(doc(db, 'artifacts', 'virtual-sign-sheet', path, id));
+      await deleteDoc(doc(doc(db, 'artifacts', 'virtual-sign-sheet'), path, id));
     }
   };
 
@@ -261,10 +286,17 @@ const App = () => {
                   <label htmlFor="agent-check" style={{ fontWeight: 'bold', color: '#0f172a' }}>I am an Agent</label>
                 </div>
                 {isAgent && (
-                  <div className="input-group">
-                    <label className="input-label">REP ID</label>
-                    <div className="input-wrapper"><Briefcase size={18} className="input-icon" /><input className="modern-input" required placeholder="Ex: ABC12" value={formData.repId} onChange={(e) => setFormData({...formData, repId: e.target.value})} disabled={isPreview}/></div>
-                  </div>
+                  <>
+                    <div className="input-group">
+                      <label className="input-label">REP ID</label>
+                      <div className="input-wrapper"><Briefcase size={18} className="input-icon" /><input className="modern-input" required placeholder="Ex: ABC12" value={formData.repId} onChange={(e) => setFormData({...formData, repId: e.target.value})} disabled={isPreview}/></div>
+                    </div>
+                    {/* NEW: Remember Me Checkbox */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', marginLeft: '0.5rem' }}>
+                      <input type="checkbox" id="remember-me" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ width: '1rem', height: '1rem' }} disabled={isPreview} />
+                      <label htmlFor="remember-me" style={{ fontSize: '0.9rem', color: '#64748b' }}>Remember my information</label>
+                    </div>
+                  </>
                 )}
               </>
             )}
