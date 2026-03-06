@@ -150,7 +150,8 @@ const App = () => {
 
       await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'), {
         name: formData.name,
-        email: liveSession.reqEmail ? formData.email : 'N/A',
+        // Update: check if email actually exists before saving, otherwise save N/A
+        email: (liveSession.reqEmail && formData.email) ? formData.email : 'N/A',
         phone: liveSession.reqPhone ? formData.phone : 'N/A',
         sessionTitle: liveSession.title,
         role: (liveSession.allowAgent && isAgent) ? 'Agent' : 'Guest',
@@ -312,8 +313,8 @@ const App = () => {
 
                 {s.reqEmail && (
                   <div className="input-group">
-                    <label className="input-label">Email Address</label>
-                    <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" required placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
+                    <label className="input-label">Email Address (Optional)</label>
+                    <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
                   </div>
                 )}
 
