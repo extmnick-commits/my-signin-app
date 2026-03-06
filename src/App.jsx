@@ -50,8 +50,9 @@ const App = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isAgent, setIsAgent] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '' });
-  const [rememberMe, setRememberMe] = useState(false); // NEW: Remember state
+  const [isEditingAgent, setIsEditingAgent] = useState(false); // Controls Agent Edit mode
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '', invitedBy: '' });
+  const [rememberMe, setRememberMe] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -64,19 +65,18 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // NEW: Auto-fill logic for Agents
+  // 2. Auto-fill logic for Returning Agents
   useEffect(() => {
-    if (isAgent) {
-      const savedAgent = localStorage.getItem('saved_agent_info');
-      if (savedAgent) {
-        const parsed = JSON.parse(savedAgent);
-        setFormData(parsed);
-        setRememberMe(true);
-      }
+    const savedAgent = localStorage.getItem('saved_agent_info');
+    if (savedAgent) {
+      const parsed = JSON.parse(savedAgent);
+      setFormData(parsed);
+      setIsAgent(true);
+      setRememberMe(true);
     }
-  }, [isAgent]);
+  }, []);
 
-  // 2. Fetch Data
+  // 3. Fetch Data
   useEffect(() => {
     const unsubSettings = onSnapshot(doc(db, 'artifacts', 'virtual-sign-sheet', 'config', 'currentSession'), (snap) => {
       if (snap.exists()) {
@@ -140,9 +140,10 @@ const App = () => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      // NEW: Save info if rememberMe is checked
+      // Save or remove agent info based on rememberMe status
       if (isAgent && rememberMe) {
         localStorage.setItem('saved_agent_info', JSON.stringify(formData));
+        setIsEditingAgent(false); // Reset editing mode
       } else if (isAgent && !rememberMe) {
         localStorage.removeItem('saved_agent_info');
       }
@@ -154,21 +155,30 @@ const App = () => {
         sessionTitle: liveSession.title,
         role: (liveSession.allowAgent && isAgent) ? 'Agent' : 'Guest',
         repId: (liveSession.allowAgent && isAgent) ? formData.repId : 'N/A',
+        invitedBy: (!isAgent && formData.invitedBy) ? formData.invitedBy : 'N/A',
         timestamp: serverTimestamp(),
         dateString: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         timeString: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       });
       
-      // Reset only if not remembering
-      if (!rememberMe) {
-        setFormData({ name: '', email: '', phone: '', repId: '' });
+      // Clear out the data entirely if it's a guest or an agent not remembering info
+      if (!isAgent || (isAgent && !rememberMe)) {
+        setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '' });
         setIsAgent(false);
       }
       
       setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 4000);
     } catch (err) { alert("Submission failed."); } 
     finally { setIsSubmitting(false); }
+  };
+
+  const clearAndReturn = () => {
+    setShowSuccess(false);
+    // Double ensure data is cleared when going back if they aren't remembered
+    if (!rememberMe) {
+       setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '' });
+       setIsAgent(false);
+    }
   };
 
   const deleteLogo = async (logoItem) => {
@@ -182,8 +192,8 @@ const App = () => {
   };
 
   const downloadCSV = () => {
-    const headers = ["Name", "Email", "Phone", "Role", "RepID", "Date", "Time"];
-    const rows = displayedSubmissions.map(s => [s.name, s.email, s.phone, s.role, s.repId, s.dateString, s.timeString]);
+    const headers = ["Name", "Email", "Phone", "Role", "RepID", "Invited By", "Date", "Time"];
+    const rows = displayedSubmissions.map(s => [s.name, s.email, s.phone, s.role, s.repId, s.invitedBy || 'N/A', s.dateString, s.timeString]);
     const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].map(e => e.join(",")).join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -247,9 +257,13 @@ const App = () => {
   // --- RENDER FORM ---
   const renderSignInForm = (isPreview = false) => {
     const s = isPreview ? builderSession : liveSession;
+    
+    // Check if we show the condensed Agent Quick Sign-In
+    const showQuickSignIn = isAgent && rememberMe && !isEditingAgent && !isPreview;
+
     return (
       <div className={`modern-card ${isPreview ? 'preview-mode' : ''}`} style={isPreview ? { transform: 'scale(0.85)', transformOrigin: 'top center', margin: '0 auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', border: '8px solid #0f172a' } : {}}>
-        <header style={{marginBottom: '2rem', textAlign: 'center'}}>
+        <header style={{marginBottom: '1.5rem', textAlign: 'center'}}>
           {s.logo && <img src={s.logo} alt="Logo" style={{height: `${s.logoHeight}px`, objectFit: 'contain', marginBottom: '1.5rem'}} />}
           <h1 style={{fontSize: '2.2rem', margin: 0}}>{s.title}</h1>
           <p style={{marginTop: '0.5rem', color: '#64748b'}}>{s.subtitle}</p>
@@ -259,48 +273,75 @@ const App = () => {
           <div style={{textAlign: 'center', padding: '2rem'}}>
             <CheckCircle2 size={64} color="#22c55e" style={{margin: '0 auto 1rem'}} />
             <h2>Sign-in Verified</h2>
-            <button onClick={() => setShowSuccess(false)} className="primary-button">Back to Form</button>
+            <button onClick={clearAndReturn} className="primary-button">Back to Form</button>
           </div>
         ) : (
           <form onSubmit={isPreview ? (e)=>e.preventDefault() : handleGuestSubmit} className="signin-form">
-            <div className="input-group">
-              <label className="input-label">Full Name</label>
-              <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" required placeholder="Name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} disabled={isPreview}/></div>
-            </div>
-            {s.reqEmail && (
-              <div className="input-group">
-                <label className="input-label">Email Address</label>
-                <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" required placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
+            
+            {/* Top Guest / Agent Toggle */}
+            {s.allowAgent && !showQuickSignIn && (
+              <div style={{ display: 'flex', background: '#f1f5f9', padding: '0.5rem', borderRadius: '12px', marginBottom: '1.5rem' }}>
+                <button type="button" onClick={() => setIsAgent(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: !isAgent ? 'white' : 'transparent', color: !isAgent ? '#0f172a' : '#64748b', fontWeight: 'bold', boxShadow: !isAgent ? '0 2px 4px rgba(0,0,0,0.05)' : 'none', transition: '0.2s', cursor: 'pointer' }}>I'm a Guest</button>
+                <button type="button" onClick={() => setIsAgent(true)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: isAgent ? 'white' : 'transparent', color: isAgent ? '#0f172a' : '#64748b', fontWeight: 'bold', boxShadow: isAgent ? '0 2px 4px rgba(0,0,0,0.05)' : 'none', transition: '0.2s', cursor: 'pointer' }}>I'm an Agent</button>
               </div>
             )}
-            {s.reqPhone && (
-              <div className="input-group">
-                <label className="input-label">Phone Number</label>
-                <div className="input-wrapper"><Phone size={18} className="input-icon" /><input className="modern-input" type="tel" required placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} disabled={isPreview}/></div>
-              </div>
-            )}
-            {s.allowAgent && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1.5rem 0', padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                  <input type="checkbox" id="agent-check" checked={isAgent} onChange={(e) => setIsAgent(e.target.checked)} style={{ width: '1.2rem', height: '1.2rem' }} disabled={isPreview} />
-                  <label htmlFor="agent-check" style={{ fontWeight: 'bold', color: '#0f172a' }}>I am an Agent</label>
+
+            {showQuickSignIn ? (
+              <div style={{textAlign: 'center', padding: '1rem 0', animation: 'fadeIn 0.4s'}}>
+                <div style={{background: '#f8fafc', padding: '2rem 1rem', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '1.5rem'}}>
+                  <h3 style={{fontSize: '1.5rem', margin: '0 0 0.5rem 0', color: '#0f172a'}}>Welcome back, {formData.name}!</h3>
+                  <p style={{color: '#64748b', margin: 0, fontWeight: 'bold'}}>REP ID: {formData.repId}</p>
                 </div>
-                {isAgent && (
-                  <>
+                <button disabled={isSubmitting} type="submit" className="primary-button" style={{marginBottom: '1.5rem', padding: '1.2rem', fontSize: '1.1rem'}}>Quick Sign In <ArrowRight size={20}/></button>
+                <button type="button" onClick={() => setIsEditingAgent(true)} style={{background: 'none', border: 'none', color: '#4f46e5', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline'}}>Change Information</button>
+              </div>
+            ) : (
+              <>
+                <div className="input-group">
+                  <label className="input-label">Full Name</label>
+                  <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" required placeholder="Name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} disabled={isPreview}/></div>
+                </div>
+
+                {/* Only show "Who invited you?" if it's a Guest */}
+                {!isAgent && (
+                  <div className="input-group" style={{ animation: 'fadeIn 0.3s' }}>
+                    <label className="input-label">Who invited you?</label>
+                    <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" placeholder="Name of person" value={formData.invitedBy} onChange={(e) => setFormData({...formData, invitedBy: e.target.value})} disabled={isPreview}/></div>
+                  </div>
+                )}
+
+                {s.reqEmail && (
+                  <div className="input-group">
+                    <label className="input-label">Email Address</label>
+                    <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" required placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
+                  </div>
+                )}
+
+                {s.reqPhone && (
+                  <div className="input-group">
+                    <label className="input-label">Phone Number</label>
+                    <div className="input-wrapper"><Phone size={18} className="input-icon" /><input className="modern-input" type="tel" required placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} disabled={isPreview}/></div>
+                  </div>
+                )}
+
+                {/* Agent Specific Fields */}
+                {s.allowAgent && isAgent && (
+                  <div style={{ animation: 'fadeIn 0.3s' }}>
                     <div className="input-group">
                       <label className="input-label">REP ID</label>
                       <div className="input-wrapper"><Briefcase size={18} className="input-icon" /><input className="modern-input" required placeholder="Ex: ABC12" value={formData.repId} onChange={(e) => setFormData({...formData, repId: e.target.value})} disabled={isPreview}/></div>
                     </div>
-                    {/* NEW: Remember Me Checkbox */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', marginLeft: '0.5rem' }}>
-                      <input type="checkbox" id="remember-me" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ width: '1rem', height: '1rem' }} disabled={isPreview} />
-                      <label htmlFor="remember-me" style={{ fontSize: '0.9rem', color: '#64748b' }}>Remember my information</label>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                      <input type="checkbox" id="remember-me" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ width: '1.2rem', height: '1.2rem' }} disabled={isPreview} />
+                      <label htmlFor="remember-me" style={{ fontWeight: 'bold', color: '#0f172a', cursor: 'pointer' }}>Remember my info on this device</label>
                     </div>
-                  </>
+                  </div>
                 )}
+
+                <button disabled={isSubmitting || isPreview} type="submit" className="primary-button" style={{marginTop: '1rem'}}>{isSubmitting ? "Processing..." : "Sign In"} <ArrowRight size={20} /></button>
               </>
             )}
-            <button disabled={isSubmitting || isPreview} type="submit" className="primary-button" style={{marginTop: '1rem'}}>{isSubmitting ? "Processing..." : "Sign In"} <ArrowRight size={20} /></button>
           </form>
         )}
       </div>
@@ -358,7 +399,7 @@ const App = () => {
                         <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem'}}>
                           <label style={{display:'flex', gap:'0.5rem'}}><input type="checkbox" checked={builderSession.reqEmail} onChange={(e)=>updateBuilder({reqEmail: e.target.checked})}/> Email Field</label>
                           <label style={{display:'flex', gap:'0.5rem'}}><input type="checkbox" checked={builderSession.reqPhone} onChange={(e)=>updateBuilder({reqPhone: e.target.checked})}/> Phone Field</label>
-                          <label style={{display:'flex', gap:'0.5rem'}}><input type="checkbox" checked={builderSession.allowAgent} onChange={(e)=>updateBuilder({allowAgent: e.target.checked})}/> Agent Login</label>
+                          <label style={{display:'flex', gap:'0.5rem'}}><input type="checkbox" checked={builderSession.allowAgent} onChange={(e)=>updateBuilder({allowAgent: e.target.checked})}/> Agent Login Toggle</label>
                         </div>
                       </div>
 
@@ -415,13 +456,17 @@ const App = () => {
 
                   <div style={{ flex: 1, background: 'white', borderRadius: '1.5rem', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                     <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                      <thead style={{background: '#f8fafc'}}><tr><th style={{padding: '1rem', textAlign:'left'}}>Name</th><th style={{padding: '1rem', textAlign:'left'}}>Contact</th><th style={{padding: '1rem', textAlign:'left'}}>Role</th><th style={{padding: '1rem', textAlign:'left'}}>Time</th><th className="print:hidden"></th></tr></thead>
+                      <thead style={{background: '#f8fafc'}}><tr><th style={{padding: '1rem', textAlign:'left'}}>Name</th><th style={{padding: '1rem', textAlign:'left'}}>Contact</th><th style={{padding: '1rem', textAlign:'left'}}>Role Details</th><th style={{padding: '1rem', textAlign:'left'}}>Time</th><th className="print:hidden"></th></tr></thead>
                       <tbody>
                         {displayedSubmissions.map(item => (
                           <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                             <td style={{padding: '1rem', fontWeight: 'bold'}}>{item.name}</td>
                             <td style={{padding: '1rem'}}>{item.email}<br/><small style={{color:'#64748b'}}>{item.phone}</small></td>
-                            <td style={{padding: '1rem'}}>{item.role} {item.role === 'Agent' && `(${item.repId})`}</td>
+                            <td style={{padding: '1rem'}}>
+                              {item.role} 
+                              {item.role === 'Agent' && ` (${item.repId})`}
+                              {item.role === 'Guest' && item.invitedBy && item.invitedBy !== 'N/A' && <><br/><small style={{color:'#64748b'}}>Invited by: {item.invitedBy}</small></>}
+                            </td>
                             <td style={{padding: '1rem', fontSize: '0.8rem'}}>{item.dateString}<br/>{item.timeString}</td>
                             <td className="print:hidden" style={{padding: '1rem', textAlign: 'right'}}><Trash2 size={16} color="#ef4444" style={{cursor: 'pointer'}} onClick={() => deleteItem('public/data/signins', item.id)} /></td>
                           </tr>
@@ -458,6 +503,7 @@ const App = () => {
         @media print { .print\:hidden { display: none !important; } }
         .tab-btn { background: none; border: none; padding: 0.5rem 1rem; font-size: 1rem; color: #64748b; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; border-bottom: 3px solid transparent; transition: 0.2s;}
         .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
       `}} />
     </div>
   );
