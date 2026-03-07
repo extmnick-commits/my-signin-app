@@ -31,6 +31,7 @@ const defaultSession = {
   reqPhone: true,
   allowAgent: true,
   reqSecuritiesLicense: false,
+  reqRvpUpline: false,
   guestTabLabel: "I'm a Guest",
   agentTabLabel: "I'm an Agent"
 };
@@ -39,14 +40,14 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('SIGNIN'); 
   const [adminTab, setAdminTab] = useState('BUILDER'); 
-  const [builderSubTab, setBuilderSubTab] = useState('GUEST'); // NEW: For Admin panel separating tabs
+  const [builderSubTab, setBuilderSubTab] = useState('GUEST'); 
   const [adminPin, setAdminPin] = useState('');
   
   // Data States
   const [submissions, setSubmissions] = useState([]);
   const [presets, setPresets] = useState([]);
   const [logoLibrary, setLogoLibrary] = useState([]);
-  const [pickingLogoTarget, setPickingLogoTarget] = useState(null); // 'logo' | 'logo2' | null
+  const [pickingLogoTarget, setPickingLogoTarget] = useState(null); 
   
   // Session States
   const [liveSession, setLiveSession] = useState(defaultSession);
@@ -60,7 +61,7 @@ const App = () => {
   const [autoSignTriggered, setAutoSignTriggered] = useState(false);
   const [isAgent, setIsAgent] = useState(false);
   const [isEditingAgent, setIsEditingAgent] = useState(false); 
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false });
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
   const [rememberMe, setRememberMe] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
@@ -91,6 +92,7 @@ const App = () => {
           reqPhone: data.reqPhone !== false,
           allowAgent: data.allowAgent !== false,
           reqSecuritiesLicense: data.reqSecuritiesLicense || false,
+          reqRvpUpline: data.reqRvpUpline || false,
           guestTabLabel: data.guestTabLabel || "I'm a Guest",
           agentTabLabel: data.agentTabLabel || "I'm an Agent"
         };
@@ -136,6 +138,7 @@ const App = () => {
         sessionTitle: liveSession.title,
         role: 'Agent',
         repId: parsedData.repId || 'N/A',
+        rvpUpline: parsedData.rvpUpline || 'N/A',
         securitiesLicense: parsedData.securitiesLicense ? 'Yes' : 'No',
         invitedBy: 'N/A',
         timestamp: serverTimestamp(),
@@ -205,6 +208,7 @@ const App = () => {
         sessionTitle: liveSession.title,
         role: (liveSession.allowAgent && isAgent) ? 'Agent' : 'Guest',
         repId: (liveSession.allowAgent && isAgent) ? formData.repId : 'N/A',
+        rvpUpline: (liveSession.reqRvpUpline && isAgent && formData.rvpUpline) ? formData.rvpUpline : 'N/A',
         securitiesLicense: (liveSession.reqSecuritiesLicense && isAgent) ? (formData.securitiesLicense ? 'Yes' : 'No') : 'N/A',
         invitedBy: (!isAgent && formData.invitedBy) ? formData.invitedBy : 'N/A',
         timestamp: serverTimestamp(),
@@ -213,7 +217,7 @@ const App = () => {
       });
       
       if (!isAgent || (isAgent && !rememberMe)) {
-        setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false });
+        setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
         setIsAgent(false);
       }
       
@@ -226,7 +230,7 @@ const App = () => {
     setShowSuccess(false);
     setAutoSignTriggered(false);
     localStorage.removeItem('saved_agent_info');
-    setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false });
+    setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
     setIsAgent(false);
     setRememberMe(false);
   };
@@ -270,8 +274,8 @@ const App = () => {
   };
 
   const downloadCSV = () => {
-    const headers = ["Name", "Email", "Phone", "Role", "RepID", "Securities License", "Invited By", "Date", "Time"];
-    const rows = displayedSubmissions.map(s => [s.name, s.email, s.phone, s.role, s.repId, s.securitiesLicense || 'N/A', s.invitedBy || 'N/A', s.dateString, s.timeString]);
+    const headers = ["Name", "Email", "Phone", "Role", "RepID", "RVP Upline", "Securities License", "Invited By", "Date", "Time"];
+    const rows = displayedSubmissions.map(s => [s.name, s.email, s.phone, s.role, s.repId, s.rvpUpline || 'N/A', s.securitiesLicense || 'N/A', s.invitedBy || 'N/A', s.dateString, s.timeString]);
     
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += `"${liveSession.title}","${liveSession.subtitle}"\n\n`;
@@ -314,7 +318,7 @@ const App = () => {
   const loadPreset = (p) => {
     updateBuilder({
       title: p.title || '', subtitle: p.subtitle || '', logo: p.logo || '', logoHeight: p.logoHeight || 80, logo2: p.logo2 || '', logoHeight2: p.logoHeight2 || 80,
-      reqEmail: p.reqEmail !== false, reqPhone: p.reqPhone !== false, allowAgent: p.allowAgent !== false, reqSecuritiesLicense: p.reqSecuritiesLicense || false,
+      reqEmail: p.reqEmail !== false, reqPhone: p.reqPhone !== false, allowAgent: p.allowAgent !== false, reqSecuritiesLicense: p.reqSecuritiesLicense || false, reqRvpUpline: p.reqRvpUpline || false,
       guestTabLabel: p.guestTabLabel || "I'm a Guest", agentTabLabel: p.agentTabLabel || "I'm an Agent"
     });
   };
@@ -357,7 +361,7 @@ const App = () => {
             <CheckCircle2 size={64} color="#22c55e" style={{margin: '0 auto 1rem'}} />
             <h2 style={{color: '#0f172a'}}>Sign-in Verified</h2>
             <p style={{color: '#64748b', marginBottom: '2rem'}}>Thank you, {formData.name}!</p>
-            <button onClick={() => { setShowSuccess(false); if(!rememberMe){ setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false }); setIsAgent(false); } }} className="primary-button" style={{marginBottom: '1rem'}}>Done</button>
+            <button onClick={() => { setShowSuccess(false); if(!rememberMe){ setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' }); setIsAgent(false); } }} className="primary-button" style={{marginBottom: '1rem'}}>Done</button>
             {autoSignTriggered && (
               <button type="button" onClick={clearAndReturn} style={{background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline'}}>Not {formData.name}? Click Here.</button>
             )}
@@ -404,6 +408,14 @@ const App = () => {
               {/* Agent Specific Fields */}
               {s.allowAgent && isAgent && (
                 <div style={{ animation: 'fadeIn 0.3s' }}>
+                  
+                  {s.reqRvpUpline && (
+                    <div className="input-group" style={{ animation: 'fadeIn 0.3s' }}>
+                      <label className="input-label">RVP Upline</label>
+                      <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" required placeholder="RVP Name" value={formData.rvpUpline} onChange={(e) => setFormData({...formData, rvpUpline: e.target.value})} disabled={isPreview}/></div>
+                    </div>
+                  )}
+
                   <div className="input-group">
                     <label className="input-label">REP ID</label>
                     <div className="input-wrapper"><Briefcase size={18} className="input-icon" /><input className="modern-input" required placeholder="Ex: ABC12" value={formData.repId} onChange={(e) => setFormData({...formData, repId: e.target.value})} disabled={isPreview}/></div>
@@ -517,6 +529,7 @@ const App = () => {
                               <label style={{fontSize: '0.8rem', color: '#64748b'}}>Agent Button Text</label>
                               <input className="modern-input" style={{marginBottom:'1rem', padding:'0.5rem'}} value={builderSession.agentTabLabel} onChange={(e) => updateBuilder({ agentTabLabel: e.target.value })} />
                               <label style={{display:'flex', gap:'0.5rem', marginBottom:'0.5rem', fontWeight:'bold'}}><input type="checkbox" checked={builderSession.allowAgent} onChange={(e)=>updateBuilder({allowAgent: e.target.checked})}/> Enable Agent Login</label>
+                              <label style={{display:'flex', gap:'0.5rem', marginBottom:'0.5rem', fontWeight:'bold'}}><input type="checkbox" checked={builderSession.reqRvpUpline} onChange={(e)=>updateBuilder({reqRvpUpline: e.target.checked})}/> Require RVP Upline Field</label>
                               <label style={{display:'flex', gap:'0.5rem', fontWeight:'bold'}}><input type="checkbox" checked={builderSession.reqSecuritiesLicense} onChange={(e)=>updateBuilder({reqSecuritiesLicense: e.target.checked})}/> Require Securities Checkbox</label>
                            </div>
                         )}
@@ -638,6 +651,7 @@ const App = () => {
                               <td style={{padding: '1rem'}}>
                                 <span style={{display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 'bold', background: item.role === 'Agent' ? '#fef2f2' : '#f0fdf4', color: item.role === 'Agent' ? '#ef4444' : '#22c55e', marginBottom: '0.3rem'}}>{item.role}</span>
                                 {item.role === 'Agent' && <><br/><small style={{color:'#64748b', fontWeight: 'bold'}}>ID: {item.repId}</small></>}
+                                {item.role === 'Agent' && item.rvpUpline && item.rvpUpline !== 'N/A' && <><br/><small style={{color:'#64748b'}}>RVP: {item.rvpUpline}</small></>}
                                 {item.securitiesLicense && item.securitiesLicense !== 'N/A' && <><br/><small style={{color:'#64748b'}}>Sec. Lic: {item.securitiesLicense}</small></>}
                                 {item.role === 'Guest' && item.invitedBy && item.invitedBy !== 'N/A' && <><br/><small style={{color:'#64748b'}}>Invited by: {item.invitedBy}</small></>}
                               </td>
