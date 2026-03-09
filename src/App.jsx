@@ -6,15 +6,15 @@ import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar, ShieldCheck, Eraser, Activity, Grid } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
+// --- FIREBASE CONFIG (Connected to .env) ---
 const firebaseConfig = {
-  apiKey: "AIzaSyCkCWbqf6M2OLQxpGJkLkf92k-eW8pIPnM",
-  authDomain: "virtual-sign-21884.firebaseapp.com",
-  projectId: "virtual-sign-21884",
-  storageBucket: "virtual-sign-21884.firebasestorage.app",
-  messagingSenderId: "1025000851049",
-  appId: "1:1025000851049:web:99c907c759ec784837c4f8"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
