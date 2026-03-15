@@ -622,7 +622,7 @@ const App = () => {
 
             {adminTab === 'ROSTER' && (
               <div className="fade-in">
-                <header style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
+                <header className="print:hidden" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
                    <div>
                      <h1 style={{margin: 0}}>Data Roster</h1>
                      <p style={{color: '#64748b', margin: '0.2rem 0 0 0'}}>Viewing: {selectedFolder === 'All' ? 'Complete History' : selectedFolder}</p>
