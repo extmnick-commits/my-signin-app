@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
-import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar, ShieldCheck, Eraser, Activity, Grid } from 'lucide-react';
+import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar, ShieldCheck, Eraser, Activity, Grid, ChevronDown, ChevronUp } from 'lucide-react';
 
 // --- FIREBASE CONFIG ---
 // --- FIREBASE CONFIG (Connected to .env) ---
@@ -65,9 +65,14 @@ const App = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [openSections, setOpenSections] = useState({});
   
   const fileInputRef1 = useRef(null);
   const fileInputRef2 = useRef(null);
+
+  const toggleSection = (key) => {
+    setOpenSections(prev => ({...prev, [key]: !prev[key]}));
+  };
 
   // 1. Auth Init
   useEffect(() => {
@@ -167,8 +172,41 @@ const App = () => {
   };
 
   // --- DERIVED DATA & ROSTER STATS ---
-  const { uniqueDates, displayedSubmissions, rosterStats } = useMemo(() => {
-    const dates = [...new Set(submissions.map(s => s.dateString))].filter(Boolean);
+  const { rosterData, displayedSubmissions, rosterStats } = useMemo(() => {
+    const dateGroups = submissions.reduce((acc, s) => {
+      if (!s.dateString) return acc;
+      
+      try {
+        const date = new Date(s.dateString);
+        // Check for invalid date
+        if (isNaN(date.getTime())) {
+          console.warn("Skipping invalid date:", s.dateString);
+          return acc;
+        }
+
+        const monthYear = date.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        
+        const weekStart = new Date(date);
+        weekStart.setDate(weekStart.getDate() - date.getDay());
+        const weekKey = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+
+        const dayName = date.toLocaleString('en-US', { weekday: 'long' });
+        const fullDate = s.dateString;
+
+        if (!acc[monthYear]) acc[monthYear] = {};
+        if (!acc[monthYear][weekKey]) acc[monthYear][weekKey] = {};
+        if (!acc[monthYear][weekKey][fullDate]) {
+          acc[monthYear][weekKey][fullDate] = { dayName, entries: 0 };
+        }
+        acc[monthYear][weekKey][fullDate].entries++;
+
+        return acc;
+      } catch (e) {
+        console.error("Error processing date string:", s.dateString, e);
+        return acc;
+      }
+    }, {});
+
     let filtered = submissions;
     if (selectedFolder !== 'All') {
       filtered = filtered.filter(s => s.dateString === selectedFolder);
@@ -186,7 +224,7 @@ const App = () => {
       guests: filtered.filter(s => s.role === 'Guest').length
     };
     
-    return { uniqueDates: dates, displayedSubmissions: filtered, rosterStats: stats };
+    return { rosterData: dateGroups, displayedSubmissions: filtered, rosterStats: stats };
   }, [submissions, selectedFolder, searchTerm]);
 
   // --- ACTIONS ---
@@ -361,7 +399,7 @@ const App = () => {
             <CheckCircle2 size={64} color="#22c55e" style={{margin: '0 auto 1rem'}} />
             <h2 style={{color: '#0f172a'}}>Sign-in Verified</h2>
             <p style={{color: '#64748b', marginBottom: '2rem'}}>Thank you, {formData.name}!</p>
-            <button onClick={() => { setShowSuccess(false); if(!rememberMe){ setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' }); setIsAgent(false); } }} className="primary-button" style={{marginBottom: '1rem'}}>Done</button>
+            
             {autoSignTriggered && (
               <button type="button" onClick={clearAndReturn} style={{background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline'}}>Not {formData.name}? Click Here.</button>
             )}
@@ -617,11 +655,38 @@ const App = () => {
                 </div>
 
                 <div style={{ display: 'flex', gap: '2rem' }}>
-                  <div className="print:hidden" style={{ width: '220px' }}>
+                  <div className="print:hidden" style={{ width: '240px', paddingRight: '1rem', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
                     <h3 style={{display:'flex', alignItems:'center', gap:'0.5rem'}}><Calendar size={18} /> Folders</h3>
-                    <button onClick={() => setSelectedFolder('All')} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === 'All' ? '#eff6ff' : 'transparent', color: selectedFolder === 'All' ? '#4f46e5' : '#64748b', fontWeight: 'bold' }}>All Records</button>
-                    {uniqueDates.map(date => (
-                      <button key={date} onClick={() => setSelectedFolder(date)} style={{ width: '100%', textAlign: 'left', padding: '0.75rem', borderRadius: '8px', border: 'none', background: selectedFolder === date ? '#eff6ff' : 'transparent', color: selectedFolder === date ? '#4f46e5' : '#64748b', fontWeight: 'bold' }}>{date}</button>
+                    <button onClick={() => setSelectedFolder('All')} className={`folder-button ${selectedFolder === 'All' ? 'active' : ''}`}>All Records</button>
+                    {Object.keys(rosterData).sort((a,b) => new Date(b) - new Date(a)).map(month => (
+                      <div key={month}>
+                        <div onClick={() => toggleSection(month)} className="folder-month-header">
+                          <span>{month}</span>
+                          {openSections[month] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </div>
+                        {openSections[month] && (
+                          <div style={{paddingLeft: '0.5rem'}}>
+                            {Object.keys(rosterData[month]).map(week => (
+                              <div key={week}>
+                                <div onClick={() => toggleSection(`${month}-${week}`)} className="folder-week-header">
+                                   <span>{week}</span>
+                                   {openSections[`${month}-${week}`] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                </div>
+                                {openSections[`${month}-${week}`] && (
+                                  <div style={{paddingLeft: '0.75rem'}}>
+                                    {Object.keys(rosterData[month][week]).sort((a,b) => new Date(b) - new Date(a)).map(date => (
+                                      <button key={date} onClick={() => setSelectedFolder(date)} className={`folder-button date-button ${selectedFolder === date ? 'active' : ''}`}>
+                                        <span style={{fontWeight:'bold'}}>{rosterData[month][week][date].dayName}</span>
+                                        <small style={{color: '#64748b'}}>{date}</small>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
 
@@ -694,6 +759,13 @@ const App = () => {
         .tab-btn { background: none; border: none; padding: 0.5rem 1rem; font-size: 1rem; color: #64748b; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; border-bottom: 3px solid transparent; transition: 0.2s;}
         .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        .folder-button { width: 100%; text-align: left; padding: 0.75rem; border-radius: 8px; border: none; background: transparent; color: #334155; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; line-height: 1.3; margin-top: 2px; }
+        .folder-button:hover { background: #f8fafc; }
+        .folder-button.active { background: #eff6ff; color: #4f46e5; }
+        .folder-month-header, .folder-week-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; cursor: pointer; border-radius: 8px; font-weight: bold; }
+        .folder-month-header { color: #1e293b; margin-top: 0.5rem; }
+        .folder-week-header { color: #334155; font-size: 0.9rem; }
+        .folder-month-header:hover, .folder-week-header:hover { background: #f8fafc; }
       `}} />
     </div>
   );
