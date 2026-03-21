@@ -31,7 +31,8 @@ const defaultSession = {
   reqPhone: true,
   allowAgent: true,
   reqSecuritiesLicense: false,
-  reqRvpUpline: false,
+  reqRvpUpline: false, 
+  dayOfWeek: 'Everyday', // New: Default day for presets
   guestTabLabel: "I'm a Guest",
   agentTabLabel: "I'm an Agent"
 };
@@ -47,6 +48,8 @@ const App = () => {
   const [submissions, setSubmissions] = useState([]);
   const [presets, setPresets] = useState([]);
   const [logoLibrary, setLogoLibrary] = useState([]);
+  const [editingPresetId, setEditingPresetId] = useState(null); // New: State to track which preset is being edited
+  const [selectedDayForPreset, setSelectedDayForPreset] = useState('Everyday'); // New: State for preset day selection
   const [pickingLogoTarget, setPickingLogoTarget] = useState(null); 
   
   // Session States
@@ -97,7 +100,8 @@ const App = () => {
           reqPhone: data.reqPhone !== false,
           allowAgent: data.allowAgent !== false,
           reqSecuritiesLicense: data.reqSecuritiesLicense || false,
-          reqRvpUpline: data.reqRvpUpline || false,
+          reqRvpUpline: data.reqRvpUpline || false, 
+          dayOfWeek: data.dayOfWeek || 'Everyday', // New: Load dayOfWeek
           guestTabLabel: data.guestTabLabel || "I'm a Guest",
           agentTabLabel: data.agentTabLabel || "I'm an Agent"
         };
@@ -118,6 +122,44 @@ const App = () => {
     return () => { unsubSignins(); unsubSettings(); unsubPresets(); };
   }, []);
 
+  // 4. Auto-apply daily preset
+  useEffect(() => {
+    if (isSessionLoaded && presets.length > 0) {
+      const currentDay = new Date().toLocaleString('en-US', { weekday: 'long' }); // e.g., "Monday"
+      let matchingPreset = null;
+
+      // Prioritize specific day presets
+      matchingPreset = presets.find(p => p.dayOfWeek === currentDay);
+
+      // Fallback to 'Everyday' preset if no specific day preset is found
+      if (!matchingPreset) {
+        matchingPreset = presets.find(p => p.dayOfWeek === 'Everyday');
+      }
+
+      if (matchingPreset) {
+        const appliedPreset = {
+          title: matchingPreset.title || defaultSession.title,
+          subtitle: matchingPreset.subtitle || defaultSession.subtitle,
+          logo: matchingPreset.logo || defaultSession.logo,
+          logoHeight: matchingPreset.logoHeight || defaultSession.logoHeight,
+          logo2: matchingPreset.logo2 || defaultSession.logo2,
+          logoHeight2: matchingPreset.logoHeight2 || defaultSession.logoHeight2,
+          reqEmail: matchingPreset.reqEmail !== false,
+          reqPhone: matchingPreset.reqPhone !== false,
+          allowAgent: matchingPreset.allowAgent !== false,
+          reqSecuritiesLicense: matchingPreset.reqSecuritiesLicense || false,
+          reqRvpUpline: matchingPreset.reqRvpUpline || false,
+          guestTabLabel: matchingPreset.guestTabLabel || defaultSession.guestTabLabel,
+          agentTabLabel: matchingPreset.agentTabLabel || defaultSession.agentTabLabel,
+          dayOfWeek: matchingPreset.dayOfWeek || defaultSession.dayOfWeek,
+        };
+        setLiveSession(appliedPreset);
+        if (!hasUnpublishedChanges) setBuilderSession(appliedPreset); // Only update builderSession if no manual changes are pending
+        console.log(`Auto-applied preset for ${currentDay}: ${matchingPreset.presetName}`);
+      }
+    }
+  }, [isSessionLoaded, presets, hasUnpublishedChanges]);
+
   // 3. Auto-Submit Feature for Returning Agents
   useEffect(() => {
     if (view === 'SIGNIN' && isSessionLoaded && !autoSignTriggered) {
@@ -131,7 +173,7 @@ const App = () => {
         performBackgroundSubmit(parsed);
       }
     }
-  }, [view, isSessionLoaded]);
+  }, [view, isSessionLoaded, autoSignTriggered]); // Added autoSignTriggered to dependencies
 
   const performBackgroundSubmit = async (parsedData) => {
     setIsSubmitting(true);
@@ -347,18 +389,40 @@ const App = () => {
   };
 
   const savePreset = async () => {
-    const name = prompt("Name this preset layout:");
+    const name = prompt(editingPresetId ? "Rename this preset layout:" : "Name this preset layout:", builderSession.presetName || '');
     if (name) {
-      await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'presets'), { ...builderSession, presetName: name });
+      const presetData = { ...builderSession, presetName: name, dayOfWeek: selectedDayForPreset };
+      if (editingPresetId) {
+        // Update existing preset
+        await setDoc(doc(db, 'artifacts', 'virtual-sign-sheet', 'presets', editingPresetId), presetData);
+        alert(`Preset "${name}" updated successfully!`);
+      } else {
+        // Add new preset
+        await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'presets'), presetData);
+        alert(`Preset "${name}" saved successfully!`);
+      }
+      setEditingPresetId(null); // Exit editing mode
+      updateBuilder(defaultSession); // Clear builder session or reset to default after saving/updating
     }
   };
 
+  // New: Load preset also updates the selectedDayForPreset dropdown
   const loadPreset = (p) => {
     updateBuilder({
       title: p.title || '', subtitle: p.subtitle || '', logo: p.logo || '', logoHeight: p.logoHeight || 80, logo2: p.logo2 || '', logoHeight2: p.logoHeight2 || 80,
       reqEmail: p.reqEmail !== false, reqPhone: p.reqPhone !== false, allowAgent: p.allowAgent !== false, reqSecuritiesLicense: p.reqSecuritiesLicense || false, reqRvpUpline: p.reqRvpUpline || false,
       guestTabLabel: p.guestTabLabel || "I'm a Guest", agentTabLabel: p.agentTabLabel || "I'm an Agent"
     });
+    // Also set the preset name in the builder session for display/editing
+    updateBuilder({ presetName: p.presetName });
+    setSelectedDayForPreset(p.dayOfWeek || 'Everyday');
+    setEditingPresetId(p.id); // Enter editing mode
+  };
+
+  const cancelEditPreset = () => {
+    setEditingPresetId(null);
+    updateBuilder(liveSession); // Revert builder to live session state
+    setSelectedDayForPreset('Everyday'); // Reset day selection
   };
 
   const handleLogoUpload = async (e, targetLogo) => {
@@ -603,12 +667,32 @@ const App = () => {
                       <div style={{borderTop: '1px solid #e2e8f0', paddingTop: '1.5rem'}}>
                         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem'}}>
                           <label className="input-label">Cloud Presets</label>
+                        <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                          <select
+                            value={selectedDayForPreset}
+                            onChange={(e) => setSelectedDayForPreset(e.target.value)}
+                            className="modern-input"
+                            style={{padding: '0.4rem 0.8rem', width: 'auto'}}
+                          >
+                            {['Everyday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => (
+                              <option key={day} value={day}>{day}</option>
+                            ))}
+                          </select>
                           <button onClick={savePreset} className="admin-toggle"><Plus size={14}/> Save Current</button>
+                        </div> {/* End of flex container for select and save button */}
+                        {editingPresetId && (
+                          <button onClick={cancelEditPreset} className="admin-toggle" style={{marginLeft: '0.5rem', color: '#ef4444'}}><X size={14}/> Cancel Edit</button>
+                        )}
                         </div>
                         <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                           {presets.map(p => (
                             <div key={p.id} style={{position: 'relative'}}>
-                              <button onClick={() => loadPreset(p)} className="admin-toggle" style={{paddingRight:'2rem'}}>{p.presetName}</button>
+                              <button 
+                                onClick={() => loadPreset(p)} 
+                                className={`admin-toggle ${editingPresetId === p.id ? 'active-edit-preset' : ''}`} 
+                                style={{paddingRight:'2rem', display: 'flex', alignItems: 'center', gap: '0.5rem'}}
+                              >
+                                <Settings size={14} /> {p.presetName} {p.dayOfWeek && `(${p.dayOfWeek})`}</button>
                               <Trash2 size={12} onClick={() => deleteItem('presets', p.id)} style={{position:'absolute', right:'8px', top:'10px', color:'#ef4444', cursor:'pointer'}} />
                             </div>
                           ))}
