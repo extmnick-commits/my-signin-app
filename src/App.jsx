@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, query, orderBy, doc, setDoc, deleteDoc, where, getDocs } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { getAuth, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 import { User, Mail, Phone, ClipboardCheck, Printer, ChevronLeft, Lock, CheckCircle2, ArrowRight, RefreshCw, Folder, Briefcase, Settings, Plus, ImageIcon, X, Trash2, Smartphone, Save, Search, Download, Calendar, ShieldCheck, Eraser, Activity, Grid, ChevronDown, ChevronUp } from 'lucide-react';
@@ -178,6 +178,21 @@ const App = () => {
   const performBackgroundSubmit = async (parsedData) => {
     setIsSubmitting(true);
     try {
+      const todayString = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+      
+      const qCheck = query(
+        collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'),
+        where('dateString', '==', todayString),
+        where('role', '==', 'Agent')
+      );
+      const snap = await getDocs(qCheck);
+      const alreadySignedIn = snap.docs.some(d => d.data().name?.toLowerCase().trim() === parsedData.name.toLowerCase().trim());
+
+      if (alreadySignedIn) {
+        setShowSuccess(true);
+        return;
+      }
+
       await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'), {
         name: parsedData.name,
         email: (liveSession.reqEmail && parsedData.email) ? parsedData.email : 'N/A',
@@ -274,6 +289,24 @@ const App = () => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const todayString = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+      const currentRole = (liveSession.allowAgent && isAgent) ? 'Agent' : 'Guest';
+
+      // Check for duplicate sign-in today
+      const qCheck = query(
+        collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'),
+        where('dateString', '==', todayString),
+        where('role', '==', currentRole)
+      );
+      const snap = await getDocs(qCheck);
+      const alreadySignedIn = snap.docs.some(d => d.data().name?.toLowerCase().trim() === formData.name.toLowerCase().trim());
+
+      if (alreadySignedIn) {
+        alert("You have already signed in today!");
+        setIsSubmitting(false);
+        return;
+      }
+
       if (isAgent && rememberMe) {
         localStorage.setItem('saved_agent_info', JSON.stringify(formData));
         setIsEditingAgent(false); 
