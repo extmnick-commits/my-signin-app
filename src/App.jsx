@@ -37,6 +37,43 @@ const defaultSession = {
   agentTabLabel: "I'm an Agent"
 };
 
+const SIGNIN_STORAGE_KEY = 'virtualsign_saved_signin';
+const LEGACY_AGENT_STORAGE_KEY = 'saved_agent_info';
+
+const emptyFormData = () => ({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
+
+const profileToFormData = (profile) => ({
+  name: profile?.name || '',
+  email: profile?.email || '',
+  phone: profile?.phone || '',
+  repId: profile?.repId || '',
+  invitedBy: profile?.invitedBy || '',
+  securitiesLicense: !!profile?.securitiesLicense,
+  rvpUpline: profile?.rvpUpline || '',
+});
+
+const persistSigninProfile = (role, form) => {
+  const profile = { role, ...profileToFormData(form), savedAt: Date.now() };
+  localStorage.setItem(SIGNIN_STORAGE_KEY, JSON.stringify(profile));
+};
+
+const readSigninProfile = () => {
+  try {
+    const raw = localStorage.getItem(SIGNIN_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore corrupt storage */ }
+  try {
+    const legacy = localStorage.getItem(LEGACY_AGENT_STORAGE_KEY);
+    if (legacy) return { ...JSON.parse(legacy), role: 'Agent' };
+  } catch { /* ignore */ }
+  return null;
+};
+
+const clearSigninProfile = () => {
+  localStorage.removeItem(SIGNIN_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_AGENT_STORAGE_KEY);
+};
+
 const App = () => {
   const [user, setUser] = useState(null);
   const [view, setView] = useState('SIGNIN'); 
@@ -64,10 +101,12 @@ const App = () => {
   const [autoSignTriggered, setAutoSignTriggered] = useState(false);
   const [isAgent, setIsAgent] = useState(false);
   const [isEditingAgent, setIsEditingAgent] = useState(false); 
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
-  const [rememberMe, setRememberMe] = useState(false);
+  const [formData, setFormData] = useState(emptyFormData);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [profileRestored, setProfileRestored] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [rosterRoleFilter, setRosterRoleFilter] = useState('All');
   const [openSections, setOpenSections] = useState({});
   
   const fileInputRef1 = useRef(null);
@@ -160,20 +199,26 @@ const App = () => {
     }
   }, [isSessionLoaded, presets, hasUnpublishedChanges]);
 
-  // 3. Auto-Submit Feature for Returning Agents
+  // 3. Restore saved sign-in + optional auto-submit for returning agents
   useEffect(() => {
-    if (view === 'SIGNIN' && isSessionLoaded && !autoSignTriggered) {
-      const savedAgent = localStorage.getItem('saved_agent_info');
-      if (savedAgent) {
-        setAutoSignTriggered(true);
-        const parsed = JSON.parse(savedAgent);
-        setFormData(parsed);
-        setIsAgent(true);
-        setRememberMe(true);
-        performBackgroundSubmit(parsed);
-      }
+    if (view !== 'SIGNIN' || !isSessionLoaded || profileRestored) return;
+
+    const profile = readSigninProfile();
+    if (!profile) return;
+
+    setProfileRestored(true);
+    const parsed = profileToFormData(profile);
+    setFormData(parsed);
+    setRememberMe(true);
+
+    if (profile.role === 'Agent' && liveSession.allowAgent) {
+      setIsAgent(true);
+      setAutoSignTriggered(true);
+      performBackgroundSubmit(parsed);
+    } else {
+      setIsAgent(profile.role === 'Agent' && liveSession.allowAgent);
     }
-  }, [view, isSessionLoaded, autoSignTriggered]); // Added autoSignTriggered to dependencies
+  }, [view, isSessionLoaded, profileRestored, liveSession.allowAgent]);
 
   const performBackgroundSubmit = async (parsedData) => {
     setIsSubmitting(true);
@@ -189,6 +234,7 @@ const App = () => {
       const alreadySignedIn = snap.docs.some(d => d.data().name?.toLowerCase().trim() === parsedData.name.toLowerCase().trim());
 
       if (alreadySignedIn) {
+        persistSigninProfile('Agent', parsedData);
         setShowSuccess(true);
         return;
       }
@@ -207,6 +253,7 @@ const App = () => {
         dateString: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
         timeString: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       });
+      persistSigninProfile('Agent', parsedData);
       setShowSuccess(true);
     } catch (e) {
       console.error("Auto sign in failed", e);
@@ -274,6 +321,9 @@ const App = () => {
         s.email?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
+    if (rosterRoleFilter !== 'All') {
+      filtered = filtered.filter(s => s.role === rosterRoleFilter);
+    }
     
     const stats = {
       total: filtered.length,
@@ -282,7 +332,17 @@ const App = () => {
     };
     
     return { rosterData: dateGroups, displayedSubmissions: filtered, rosterStats: stats };
-  }, [submissions, selectedFolder, searchTerm]);
+  }, [submissions, selectedFolder, searchTerm, rosterRoleFilter]);
+
+  const sortRosterWeeks = (month, weeks) => {
+    return [...weeks].sort((wa, wb) => {
+      const maxFor = (week) => Math.max(
+        ...Object.keys(rosterData[month][week]).map((d) => new Date(d).getTime() || 0),
+        0
+      );
+      return maxFor(wb) - maxFor(wa);
+    });
+  };
 
   // --- ACTIONS ---
   const handleGuestSubmit = async (e) => {
@@ -307,11 +367,11 @@ const App = () => {
         return;
       }
 
-      if (isAgent && rememberMe) {
-        localStorage.setItem('saved_agent_info', JSON.stringify(formData));
-        setIsEditingAgent(false); 
-      } else if (isAgent && !rememberMe) {
-        localStorage.removeItem('saved_agent_info');
+      if (rememberMe) {
+        persistSigninProfile(currentRole, formData);
+        if (isAgent) setIsEditingAgent(false);
+      } else {
+        clearSigninProfile();
       }
 
       await addDoc(collection(db, 'artifacts', 'virtual-sign-sheet', 'public', 'data', 'signins'), {
@@ -329,8 +389,8 @@ const App = () => {
         timeString: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       });
       
-      if (!isAgent || (isAgent && !rememberMe)) {
-        setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
+      if (!rememberMe) {
+        setFormData(emptyFormData());
         setIsAgent(false);
       }
       
@@ -342,10 +402,11 @@ const App = () => {
   const clearAndReturn = () => {
     setShowSuccess(false);
     setAutoSignTriggered(false);
-    localStorage.removeItem('saved_agent_info');
-    setFormData({ name: '', email: '', phone: '', repId: '', invitedBy: '', securitiesLicense: false, rvpUpline: '' });
+    setProfileRestored(false);
+    clearSigninProfile();
+    setFormData(emptyFormData());
     setIsAgent(false);
-    setRememberMe(false);
+    setRememberMe(true);
   };
 
   const cleanDuplicates = async () => {
@@ -482,13 +543,14 @@ const App = () => {
     
     return (
       <div className={`modern-card ${isPreview ? 'preview-mode' : ''}`} style={isPreview ? { transform: 'scale(0.85)', transformOrigin: 'top center', margin: '0 auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', border: '8px solid #0f172a' } : {}}>
-        <header style={{marginBottom: '1.5rem', textAlign: 'center'}}>
-          <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.5rem', marginBottom: '1.5rem', flexWrap: 'wrap'}}>
+        <header className="signin-header">
+          <div className="session-logos">
             {s.logo && <img src={s.logo} alt="Primary Logo" style={{height: `${s.logoHeight}px`, objectFit: 'contain'}} />}
             {s.logo2 && <img src={s.logo2} alt="Secondary Logo" style={{height: `${s.logoHeight2}px`, objectFit: 'contain'}} />}
           </div>
-          <h1 style={{fontSize: '2.2rem', margin: 0}}>{s.title}</h1>
-          <p style={{marginTop: '0.5rem', color: '#64748b'}}>{s.subtitle}</p>
+          <span className="eyebrow"><span /> WELCOME IN</span>
+          <h1>{s.title}</h1>
+          <p>{s.subtitle}</p>
         </header>
 
         {showSuccess && !isPreview ? (
@@ -506,16 +568,16 @@ const App = () => {
             
             {/* Top Guest / Agent Toggle */}
             {s.allowAgent && !autoSignTriggered && (
-              <div style={{ display: 'flex', background: '#f1f5f9', padding: '0.5rem', borderRadius: '12px', marginBottom: '1.5rem' }}>
-                <button type="button" onClick={() => setIsAgent(false)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: !isAgent ? 'white' : 'transparent', color: !isAgent ? '#0f172a' : '#64748b', fontWeight: 'bold', boxShadow: !isAgent ? '0 2px 4px rgba(0,0,0,0.05)' : 'none', transition: '0.2s', cursor: 'pointer' }}>{s.guestTabLabel}</button>
-                <button type="button" onClick={() => setIsAgent(true)} style={{ flex: 1, padding: '0.75rem', borderRadius: '8px', border: 'none', background: isAgent ? 'white' : 'transparent', color: isAgent ? '#0f172a' : '#64748b', fontWeight: 'bold', boxShadow: isAgent ? '0 2px 4px rgba(0,0,0,0.05)' : 'none', transition: '0.2s', cursor: 'pointer' }}>{s.agentTabLabel}</button>
+              <div className="role-switch" aria-label="Select your role">
+                <button type="button" className={!isAgent ? 'is-active' : ''} onClick={() => setIsAgent(false)}>{s.guestTabLabel}</button>
+                <button type="button" className={isAgent ? 'is-active' : ''} onClick={() => setIsAgent(true)}>{s.agentTabLabel}</button>
               </div>
             )}
 
             <>
               <div className="input-group">
                 <label className="input-label">Full Name</label>
-                <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" required placeholder="Name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} disabled={isPreview}/></div>
+                <div className="input-wrapper"><User size={18} className="input-icon" /><input className="modern-input" required placeholder="Name" autoComplete="name" enterKeyHint="next" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} disabled={isPreview}/></div>
               </div>
 
               {/* Only show "Who invited you?" if it's a Guest */}
@@ -529,14 +591,14 @@ const App = () => {
               {s.reqEmail && (
                 <div className="input-group">
                   <label className="input-label">Email Address (Optional)</label>
-                  <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
+                  <div className="input-wrapper"><Mail size={18} className="input-icon" /><input className="modern-input" type="email" inputMode="email" autoComplete="email" enterKeyHint="next" placeholder="Email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} disabled={isPreview}/></div>
                 </div>
               )}
 
               {s.reqPhone && (
                 <div className="input-group">
                   <label className="input-label">Phone Number</label>
-                  <div className="input-wrapper"><Phone size={18} className="input-icon" /><input className="modern-input" type="tel" required placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} disabled={isPreview}/></div>
+                  <div className="input-wrapper"><Phone size={18} className="input-icon" /><input className="modern-input" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="done" required placeholder="Phone" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} disabled={isPreview}/></div>
                 </div>
               )}
 
@@ -562,11 +624,16 @@ const App = () => {
                       <label htmlFor="sec-license" style={{ fontWeight: 'bold', color: '#1e40af', cursor: 'pointer' }}>I hold a Securities License</label>
                     </div>
                   )}
-                  
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem', background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                    <input type="checkbox" id="remember-me" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ width: '1.2rem', height: '1.2rem' }} disabled={isPreview} />
-                    <label htmlFor="remember-me" style={{ fontWeight: 'bold', color: '#0f172a', cursor: 'pointer' }}>Remember my info on this device</label>
-                  </div>
+                </div>
+              )}
+
+              {!isPreview && !autoSignTriggered && (
+                <div className="remember-device" style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.25rem', background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                  <input type="checkbox" id="remember-me" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} style={{ width: '1.2rem', height: '1.2rem', marginTop: '0.15rem' }} />
+                  <label htmlFor="remember-me" style={{ fontWeight: 'bold', color: '#0f172a', cursor: 'pointer', lineHeight: 1.45 }}>
+                    Remember my info on this device
+                    <span style={{ display: 'block', fontWeight: 600, color: '#64748b', fontSize: '0.8rem', marginTop: '0.2rem' }}>We&apos;ll fill this form the next time you visit.</span>
+                  </label>
                 </div>
               )}
 
@@ -602,7 +669,7 @@ const App = () => {
 
       <nav className="navbar print:hidden">
         <div className="logo-section" onClick={() => setView('SIGNIN')} style={{cursor: 'pointer'}}>
-          <div style={{background: '#4f46e5', padding: '8px', borderRadius: '12px'}}><ClipboardCheck size={20} color="white" /></div>
+          <div className="brand-icon"><ClipboardCheck size={19} /></div>
           <span className="logo-text">VirtualSign</span>
         </div>
         <button onClick={() => setView(view === 'SIGNIN' ? 'ADMIN_LOGIN' : 'SIGNIN')} className="admin-toggle">
@@ -611,7 +678,7 @@ const App = () => {
       </nav>
 
       <main className="main-container">
-        {view === 'SIGNIN' && renderSignInForm(false)}
+        {view === 'SIGNIN' && <div className="signin-layout"><div className="signin-intro"><div className="intro-mark"><ClipboardCheck size={25} /></div><div className="intro-content"><h2>Glad you’re here.</h2></div></div><div className="signin-panel">{renderSignInForm(false)}<p className="signin-footer">Thank you for checking in with us.</p></div></div>}
 
         {view === 'ADMIN_LOGIN' && (
           <div className="modern-card login-card" style={{maxWidth: '400px', margin: '5rem auto'}}>
@@ -739,62 +806,96 @@ const App = () => {
 
             {adminTab === 'ROSTER' && (
               <div className="fade-in">
-                <header className="print:hidden" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem'}}>
+                <header className="print:hidden roster-toolbar">
                    <div>
-                     <h1 style={{margin: 0}}>Data Roster</h1>
-                     <p style={{color: '#64748b', margin: '0.2rem 0 0 0'}}>Viewing: {selectedFolder === 'All' ? 'Complete History' : selectedFolder}</p>
+                     <h1 className="roster-page-title">Data Roster</h1>
+                     <p className="roster-page-subtitle">Browse sign-ins by date, search attendees, and export your log.</p>
+                     <span className="roster-context-pill">
+                       <Calendar size={14} />
+                       {selectedFolder === 'All' ? 'All dates' : selectedFolder}
+                     </span>
                    </div>
-                   <div style={{display: 'flex', gap: '1rem'}}>
-                     <div className="input-wrapper" style={{width: '250px'}}>
+                   <div className="roster-toolbar-actions">
+                     <div className="input-wrapper roster-search">
                         <Search size={18} className="input-icon" />
-                        <input className="modern-input" placeholder="Search names or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                        <input className="modern-input" placeholder="Search name or email…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} aria-label="Search roster" />
                      </div>
-                     <button onClick={cleanDuplicates} className="admin-toggle" style={{color: '#f59e0b'}}><Eraser size={18} /> Clean Duplicates</button>
-                     <button onClick={downloadCSV} className="admin-toggle"><Download size={18} /> Export CSV</button>
-                     <button onClick={() => window.print()} className="primary-button" style={{width: 'auto'}}><Printer size={18} /> Print PDF</button>
+                     <button type="button" onClick={cleanDuplicates} className="admin-toggle" style={{color: '#b45309'}}><Eraser size={18} /> Clean Duplicates</button>
+                     <button type="button" onClick={downloadCSV} className="admin-toggle"><Download size={18} /> Export CSV</button>
+                     <button type="button" onClick={() => window.print()} className="primary-button" style={{width: 'auto'}}><Printer size={18} /> Print PDF</button>
                    </div>
                 </header>
 
-                {/* Dashboard Stats */}
-                <div className="print:hidden" style={{display: 'flex', gap: '1.5rem', marginBottom: '2rem'}}>
-                   <div style={{flex: 1, background: 'white', padding: '1.5rem', borderRadius: '1rem', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                     <div style={{background: '#eff6ff', padding: '1rem', borderRadius: '50%', color: '#3b82f6'}}><Activity size={24}/></div>
-                     <div><p style={{margin: 0, color: '#64748b', fontWeight: 'bold'}}>Total Sign-ins</p><h2 style={{margin: 0, fontSize: '2rem'}}>{rosterStats.total}</h2></div>
+                <div className="print:hidden roster-filters" role="group" aria-label="Filter by role">
+                  {['All', 'Agent', 'Guest'].map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      className={`roster-filter-chip ${rosterRoleFilter === role ? 'is-active' : ''}`}
+                      onClick={() => setRosterRoleFilter(role)}
+                    >
+                      {role === 'All' ? 'Everyone' : role === 'Agent' ? 'Agents only' : 'Guests only'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="print:hidden roster-stats">
+                   <div className="roster-stat-card">
+                     <div className="roster-stat-icon roster-stat-icon--total"><Activity size={22}/></div>
+                     <div>
+                       <p className="roster-stat-label">Total sign-ins</p>
+                       <p className="roster-stat-value">{rosterStats.total}</p>
+                     </div>
                    </div>
-                   <div style={{flex: 1, background: 'white', padding: '1.5rem', borderRadius: '1rem', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                     <div style={{background: '#fef2f2', padding: '1rem', borderRadius: '50%', color: '#ef4444'}}><Briefcase size={24}/></div>
-                     <div><p style={{margin: 0, color: '#64748b', fontWeight: 'bold'}}>Total Agents</p><h2 style={{margin: 0, fontSize: '2rem'}}>{rosterStats.agents}</h2></div>
+                   <div className="roster-stat-card">
+                     <div className="roster-stat-icon roster-stat-icon--agents"><Briefcase size={22}/></div>
+                     <div>
+                       <p className="roster-stat-label">Agents</p>
+                       <p className="roster-stat-value">{rosterStats.agents}</p>
+                     </div>
                    </div>
-                   <div style={{flex: 1, background: 'white', padding: '1.5rem', borderRadius: '1rem', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '1rem'}}>
-                     <div style={{background: '#f0fdf4', padding: '1rem', borderRadius: '50%', color: '#22c55e'}}><User size={24}/></div>
-                     <div><p style={{margin: 0, color: '#64748b', fontWeight: 'bold'}}>Total Guests</p><h2 style={{margin: 0, fontSize: '2rem'}}>{rosterStats.guests}</h2></div>
+                   <div className="roster-stat-card">
+                     <div className="roster-stat-icon roster-stat-icon--guests"><User size={22}/></div>
+                     <div>
+                       <p className="roster-stat-label">Guests</p>
+                       <p className="roster-stat-value">{rosterStats.guests}</p>
+                     </div>
                    </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '2rem' }}>
-                  <div className="print:hidden" style={{ width: '240px', paddingRight: '1rem', maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
-                    <h3 style={{display:'flex', alignItems:'center', gap:'0.5rem'}}><Calendar size={18} /> Folders</h3>
-                    <button onClick={() => setSelectedFolder('All')} className={`folder-button ${selectedFolder === 'All' ? 'active' : ''}`}>All Records</button>
+                <div className="roster-body">
+                  <aside className="print:hidden roster-sidebar" aria-label="Browse by date">
+                    <div className="roster-sidebar-head">
+                      <h3><Calendar size={16} /> Browse dates</h3>
+                    </div>
+                    <div className="roster-sidebar-scroll">
+                    <button type="button" onClick={() => setSelectedFolder('All')} className={`folder-button ${selectedFolder === 'All' ? 'active' : ''}`}>
+                      <span>All records</span>
+                      <span className="folder-count">{submissions.length}</span>
+                    </button>
                     {Object.keys(rosterData).sort((a,b) => new Date(b) - new Date(a)).map(month => (
                       <div key={month}>
-                        <div onClick={() => toggleSection(month)} className="folder-month-header">
+                        <div onClick={() => toggleSection(month)} className="folder-month-header" role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && toggleSection(month)}>
                           <span>{month}</span>
                           {openSections[month] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                         </div>
                         {openSections[month] && (
-                          <div style={{paddingLeft: '0.5rem'}}>
-                            {Object.keys(rosterData[month]).map(week => (
+                          <div className="folder-nested">
+                            {sortRosterWeeks(month, Object.keys(rosterData[month])).map(week => (
                               <div key={week}>
-                                <div onClick={() => toggleSection(`${month}-${week}`)} className="folder-week-header">
+                                <div onClick={() => toggleSection(`${month}-${week}`)} className="folder-week-header" role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && toggleSection(`${month}-${week}`)}>
                                    <span>{week}</span>
                                    {openSections[`${month}-${week}`] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                 </div>
                                 {openSections[`${month}-${week}`] && (
-                                  <div style={{paddingLeft: '0.75rem'}}>
+                                  <div className="folder-nested">
                                     {Object.keys(rosterData[month][week]).sort((a,b) => new Date(b) - new Date(a)).map(date => (
-                                      <button key={date} onClick={() => setSelectedFolder(date)} className={`folder-button date-button ${selectedFolder === date ? 'active' : ''}`}>
-                                        <span style={{fontWeight:'bold'}}>{rosterData[month][week][date].dayName}</span>
-                                        <small style={{color: '#64748b'}}>{date}</small>
+                                      <button type="button" key={date} onClick={() => setSelectedFolder(date)} className={`folder-button date-button ${selectedFolder === date ? 'active' : ''}`}>
+                                        <span className="folder-date-meta">
+                                          <strong>{rosterData[month][week][date].dayName}</strong>
+                                          <small>{date}</small>
+                                        </span>
+                                        <span className="folder-count">{rosterData[month][week][date].entries}</span>
                                       </button>
                                     ))}
                                   </div>
@@ -805,46 +906,68 @@ const App = () => {
                         )}
                       </div>
                     ))}
-                  </div>
+                    </div>
+                  </aside>
 
-                  <div style={{ flex: 1, background: 'white', borderRadius: '1.5rem', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-                    
+                  <section className="roster-table-wrap">
+                    <div className="print:hidden roster-table-head">
+                      <h2>Sign-in log</h2>
+                      <span>{displayedSubmissions.length} {displayedSubmissions.length === 1 ? 'entry' : 'entries'}</span>
+                    </div>
+
                     {/* PDF Print Header (Hidden on screen) */}
                     <div className="print-only" style={{ padding: '2rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0' }}>
                       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '2rem', marginBottom: '1.5rem' }}>
-                        {liveSession.logo && <img src={liveSession.logo} style={{ height: `${liveSession.logoHeight}px`, objectFit: 'contain' }} />}
-                        {liveSession.logo2 && <img src={liveSession.logo2} style={{ height: `${liveSession.logoHeight2}px`, objectFit: 'contain' }} />}
+                        {liveSession.logo && <img src={liveSession.logo} alt="" style={{ height: `${liveSession.logoHeight}px`, objectFit: 'contain' }} />}
+                        {liveSession.logo2 && <img src={liveSession.logo2} alt="" style={{ height: `${liveSession.logoHeight2}px`, objectFit: 'contain' }} />}
                       </div>
                       <h1 style={{ margin: 0, color: '#0f172a' }}>{liveSession.title}</h1>
                       <p style={{ margin: '0.5rem 0 0 0', color: '#64748b', fontSize: '1.2rem' }}>{liveSession.subtitle}</p>
                       <p style={{ margin: '1rem 0 0 0', fontWeight: 'bold' }}>Date Log: {selectedFolder}</p>
                     </div>
 
-                    <table style={{width: '100%', borderCollapse: 'collapse'}}>
-                      <thead style={{background: '#f8fafc'}}><tr><th style={{padding: '1rem', textAlign:'left'}}>Name</th><th style={{padding: '1rem', textAlign:'left'}}>Contact</th><th style={{padding: '1rem', textAlign:'left'}}>Role Details</th><th style={{padding: '1rem', textAlign:'left'}}>Time</th><th className="print:hidden"></th></tr></thead>
+                    <div className="roster-table-scroll table-scroll">
+                    <table className="roster-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Contact</th>
+                          <th>Role details</th>
+                          <th>Time</th>
+                          <th className="print:hidden" aria-label="Actions" />
+                        </tr>
+                      </thead>
                       <tbody>
                         {displayedSubmissions.length === 0 ? (
-                          <tr><td colSpan="5" style={{padding: '3rem', textAlign: 'center', color: '#94a3b8'}}>No sign-ins found.</td></tr>
+                          <tr><td colSpan={5} className="roster-empty">No sign-ins match your filters. Try another date or clear search.</td></tr>
                         ) : (
                           displayedSubmissions.map(item => (
-                            <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{padding: '1rem', fontWeight: 'bold'}}>{item.name}</td>
-                              <td style={{padding: '1rem'}}>{item.email}<br/><small style={{color:'#64748b'}}>{item.phone}</small></td>
-                              <td style={{padding: '1rem'}}>
-                                <span style={{display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 'bold', background: item.role === 'Agent' ? '#fef2f2' : '#f0fdf4', color: item.role === 'Agent' ? '#ef4444' : '#22c55e', marginBottom: '0.3rem'}}>{item.role}</span>
-                                {item.role === 'Agent' && <><br/><small style={{color:'#64748b', fontWeight: 'bold'}}>ID: {item.repId}</small></>}
-                                {item.role === 'Agent' && item.rvpUpline && item.rvpUpline !== 'N/A' && <><br/><small style={{color:'#64748b'}}>RVP: {item.rvpUpline}</small></>}
-                                {item.securitiesLicense && item.securitiesLicense !== 'N/A' && <><br/><small style={{color:'#64748b'}}>Sec. Lic: {item.securitiesLicense}</small></>}
-                                {item.role === 'Guest' && item.invitedBy && item.invitedBy !== 'N/A' && <><br/><small style={{color:'#64748b'}}>Invited by: {item.invitedBy}</small></>}
+                            <tr key={item.id}>
+                              <td><span className="roster-name">{item.name}</span></td>
+                              <td>
+                                {item.email !== 'N/A' ? item.email : <span className="roster-contact-secondary">No email</span>}
+                                {item.phone && item.phone !== 'N/A' && <span className="roster-contact-secondary">{item.phone}</span>}
                               </td>
-                              <td style={{padding: '1rem', fontSize: '0.8rem', color: '#64748b'}}>{item.dateString}<br/>{item.timeString}</td>
-                              <td className="print:hidden" style={{padding: '1rem', textAlign: 'right'}}><Trash2 size={16} color="#ef4444" style={{cursor: 'pointer'}} onClick={() => deleteItem('public/data/signins', item.id)} /></td>
+                              <td>
+                                <span className={`roster-role-badge ${item.role === 'Agent' ? 'roster-role-badge--agent' : 'roster-role-badge--guest'}`}>{item.role}</span>
+                                {item.role === 'Agent' && <span className="roster-meta-line">ID: {item.repId}</span>}
+                                {item.role === 'Agent' && item.rvpUpline && item.rvpUpline !== 'N/A' && <span className="roster-meta-line">RVP: {item.rvpUpline}</span>}
+                                {item.securitiesLicense && item.securitiesLicense !== 'N/A' && <span className="roster-meta-line">Sec. lic: {item.securitiesLicense}</span>}
+                                {item.role === 'Guest' && item.invitedBy && item.invitedBy !== 'N/A' && <span className="roster-meta-line">Invited by: {item.invitedBy}</span>}
+                              </td>
+                              <td className="roster-time">{item.dateString}<br />{item.timeString}</td>
+                              <td className="print:hidden">
+                                <button type="button" className="roster-delete-btn" aria-label={`Remove ${item.name}`} onClick={() => deleteItem('public/data/signins', item.id)}>
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
                             </tr>
                           ))
                         )}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </section>
                 </div>
               </div>
             )}
@@ -876,13 +999,6 @@ const App = () => {
         .tab-btn { background: none; border: none; padding: 0.5rem 1rem; font-size: 1rem; color: #64748b; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; border-bottom: 3px solid transparent; transition: 0.2s;}
         .tab-btn.active { color: #4f46e5; border-bottom-color: #4f46e5; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        .folder-button { width: 100%; text-align: left; padding: 0.75rem; border-radius: 8px; border: none; background: transparent; color: #334155; font-weight: bold; cursor: pointer; display: flex; flex-direction: column; line-height: 1.3; margin-top: 2px; }
-        .folder-button:hover { background: #f8fafc; }
-        .folder-button.active { background: #eff6ff; color: #4f46e5; }
-        .folder-month-header, .folder-week-header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; cursor: pointer; border-radius: 8px; font-weight: bold; }
-        .folder-month-header { color: #1e293b; margin-top: 0.5rem; }
-        .folder-week-header { color: #334155; font-size: 0.9rem; }
-        .folder-month-header:hover, .folder-week-header:hover { background: #f8fafc; }
       `}} />
     </div>
   );
