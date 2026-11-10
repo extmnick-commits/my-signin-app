@@ -74,9 +74,28 @@ const clearSigninProfile = () => {
   localStorage.removeItem(LEGACY_AGENT_STORAGE_KEY);
 };
 
+const ADMIN_PATH = '/admin';
+const ADMIN_SESSION_KEY = 'virtualsign_admin_unlocked';
+
+const normalizePath = (pathname) => {
+  const trimmed = pathname.replace(/\/+$/, '');
+  return trimmed === '' ? '/' : trimmed;
+};
+
+const isAdminPath = (pathname = window.location.pathname) => {
+  const path = normalizePath(pathname);
+  return path === ADMIN_PATH || path.startsWith(`${ADMIN_PATH}/`);
+};
+
+const resolveAdminView = () =>
+  sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true' ? 'ADMIN_DASHBOARD' : 'ADMIN_LOGIN';
+
+const initialAppView = () => (isAdminPath() ? resolveAdminView() : 'SIGNIN');
+
 const App = () => {
   const [user, setUser] = useState(null);
-  const [view, setView] = useState('SIGNIN'); 
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+  const [view, setView] = useState(initialAppView);
   const [adminTab, setAdminTab] = useState('BUILDER'); 
   const [builderSubTab, setBuilderSubTab] = useState('GUEST'); 
   const [adminPin, setAdminPin] = useState('');
@@ -115,6 +134,35 @@ const App = () => {
   const toggleSection = (key) => {
     setOpenSections(prev => ({...prev, [key]: !prev[key]}));
   };
+
+  const navigate = (path) => {
+    const next = path.startsWith('/') ? path : `/${path}`;
+    if (window.location.pathname !== next) {
+      window.history.pushState({}, '', next);
+    }
+    setPathname(next);
+    if (isAdminPath(next)) {
+      setView(resolveAdminView());
+    } else {
+      setView('SIGNIN');
+    }
+  };
+
+  useEffect(() => {
+    const onPopState = () => {
+      const next = window.location.pathname;
+      setPathname(next);
+      if (isAdminPath(next)) {
+        setView(resolveAdminView());
+      } else {
+        setView('SIGNIN');
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const onAdminRoute = isAdminPath(pathname);
 
   // 1. Auth Init
   useEffect(() => {
@@ -465,8 +513,15 @@ const App = () => {
 
   const handleAdminLogin = (e) => {
     e.preventDefault();
-    if (adminPin === '2501') { setView('ADMIN_DASHBOARD'); setAdminPin(''); } 
-    else { alert("Incorrect PIN"); setAdminPin(''); }
+    if (adminPin === '2501') {
+      sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
+      setAdminPin('');
+      setView('ADMIN_DASHBOARD');
+      if (!isAdminPath(pathname)) navigate(ADMIN_PATH);
+    } else {
+      alert("Incorrect PIN");
+      setAdminPin('');
+    }
   };
 
   const updateBuilder = (newData) => {
@@ -668,19 +723,26 @@ const App = () => {
       )}
 
       <nav className="navbar print:hidden">
-        <div className="logo-section" onClick={() => setView('SIGNIN')} style={{cursor: 'pointer'}}>
+        <div className="logo-section" onClick={() => navigate('/')} style={{cursor: 'pointer'}} role="link" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate('/')}>
           <div className="brand-icon"><ClipboardCheck size={19} /></div>
           <span className="logo-text">VirtualSign</span>
         </div>
-        <button onClick={() => setView(view === 'SIGNIN' ? 'ADMIN_LOGIN' : 'SIGNIN')} className="admin-toggle">
-          {view === 'SIGNIN' ? <><Lock size={14} /> Admin</> : <><ChevronLeft size={14} /> Back</>}
-        </button>
+        {onAdminRoute && (
+          <button type="button" onClick={() => navigate('/')} className="admin-toggle">
+            <ChevronLeft size={14} /> Sign-in page
+          </button>
+        )}
       </nav>
 
       <main className="main-container">
-        {view === 'SIGNIN' && <div className="signin-layout"><div className="signin-intro"><div className="intro-mark"><ClipboardCheck size={25} /></div><div className="intro-content"><h2>Glad you’re here.</h2></div></div><div className="signin-panel">{renderSignInForm(false)}<p className="signin-footer">Thank you for checking in with us.</p></div></div>}
+        {!onAdminRoute && (
+          <div className="signin-layout">
+            <div className="signin-intro"><div className="intro-mark"><ClipboardCheck size={25} /></div><div className="intro-content"><h2>Glad you’re here.</h2></div></div>
+            <div className="signin-panel">{renderSignInForm(false)}<p className="signin-footer">Thank you for checking in with us.</p></div>
+          </div>
+        )}
 
-        {view === 'ADMIN_LOGIN' && (
+        {onAdminRoute && view === 'ADMIN_LOGIN' && (
           <div className="modern-card login-card" style={{maxWidth: '400px', margin: '5rem auto'}}>
              <Lock size={48} color="#4f46e5" style={{margin: '0 auto 1rem'}} />
              <h2>Admin Access</h2>
@@ -691,7 +753,7 @@ const App = () => {
           </div>
         )}
 
-        {view === 'ADMIN_DASHBOARD' && (
+        {onAdminRoute && view === 'ADMIN_DASHBOARD' && (
           <div className="admin-dashboard">
             <div className="admin-tabs print:hidden" style={{display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '2px solid #e2e8f0', paddingBottom: '1rem'}}>
                <button onClick={() => setAdminTab('BUILDER')} className={`tab-btn ${adminTab === 'BUILDER' ? 'active' : ''}`}><Settings size={18}/> Page Builder</button>

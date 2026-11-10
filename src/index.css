@@ -7,6 +7,7 @@ button, input, select { font: inherit; }
 button { transition: background .2s, border-color .2s, box-shadow .2s, transform .2s; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #9bcfc4; outline-offset: 2px; }
 .navbar { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: 1rem clamp(1.25rem, 4vw, 4rem); padding-top: max(1rem, env(safe-area-inset-top)); padding-left: max(clamp(1.25rem, 4vw, 4rem), env(safe-area-inset-left)); padding-right: max(clamp(1.25rem, 4vw, 4rem), env(safe-area-inset-right)); background: rgba(255,255,255,.88); border-bottom: 1px solid #e7ecec; position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); }
+.navbar:not(:has(.admin-toggle)) { justify-content: center; }
 .logo-section { display: flex; align-items: center; gap: .7rem; font-weight: 750; font-size: 1.05rem; letter-spacing: -.04em; }
 .brand-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: white; background: #185d55; }
 .admin-toggle { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: var(--touch-min); padding: .65rem 1rem; border-radius: 9px; border: 1px solid #dfe7e7; background: #fff; color: #52636d; font-weight: 650; font-size: .85rem; cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
